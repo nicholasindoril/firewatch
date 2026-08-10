@@ -1,0 +1,767 @@
+#!/usr/bin/env python3
+"""Firewatch — live fire hotspot monitor for Termux.
+
+Live data from NASA FIRMS (VIIRS/MODIS). Get a free API key at:
+  https://earthdata.nasa.gov  ->  register ->  request FIRMS API key
+
+Usage:
+  python firewatch.py                  # default area (Athens)
+  python firewatch.py --area thessaloniki
+  python firewatch.py --lat 32.08 --lon 34.78 --radius 80
+  python firewatch.py --zip 10563              # by postal code (Greece)
+  python firewatch.py --zip 75001 --country France
+  python firewatch.py --gps                   # device GPS via termux-api
+  python firewatch.py --source all     # merge SNPP + NOAA-20 + NOAA-21 + MODIS
+  python firewatch.py --once           # single snapshot, no TUI (cron-friendly)
+  python firewatch.py --demo           # offline demo with sample data
+
+Keys: q quit · r refresh now · c cycle area preset · z postal code · g GPS
+      · + / - radius
+Env:  FIRMS_API_KEY (or pass --key)
+"""
+
+import argparse
+import csv
+import datetime as dt
+import json
+import math
+import os
+import re
+import select
+import sys
+import threading
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+except ImportError:
+    print("Missing dependency: pip install rich", file=sys.stderr)
+    sys.exit(1)
+
+CONFIG_PATH = Path.home() / ".config" / "firewatch.json"
+API = "https://firms.modaps.eosdis.nasa.gov/api/area/csv/{key}/{src}/{west},{south},{east},{north}/{days}"
+
+DEFAULT_KEY = "82b260ac3b61b77e4b4215e94bbe4a43"  # falls back when FIRMS_API_KEY unset
+
+PRESETS = {
+    "athens": (37.9838, 23.7275),
+    "thessaloniki": (40.6401, 22.9444),
+    "patras": (38.2466, 21.7346),
+    "heraklion": (35.3387, 25.1442),
+    "rhodes": (36.4349, 28.2176),
+    "korinthos": (37.9380, 22.9326),
+}
+SOURCES = {"viirs": "VIIRS_SNPP_NRT", "noaa20": "VIIRS_NOAA20_NRT",
+           "noaa21": "VIIRS_NOAA21_NRT", "modis": "MODIS_NRT",
+           "all": "ALL"}
+# "all" merges detections from every NRT satellite for cross-checking
+MULTI_SRCS = ["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "MODIS_NRT"]
+MAX_RADIUS = {"VIIRS_SNPP_NRT": 500, "VIIRS_NOAA20_NRT": 500, "VIIRS_NOAA21_NRT": 500,
+              "MODIS_NRT": 2000, "ALL": 500}
+MIN_RADIUS = 5
+ZOOM = 1.4  # zoom factor per + / - press
+WARN_KM = 10.0
+SATS = {"N": "SN", "NPP": "SN", "N20": "N20", "NOAA-20": "N20",
+        "N21": "N21", "NOAA-21": "N21", "T": "MOD", "Terra": "MOD",
+        "A": "MOD", "Aqua": "MOD"}
+
+# (lat, lon, bright, acq_date, acq_time, satellite, instrument, confidence, frp, daynight)
+DEMO_FIRES = [
+    (31.95, 34.90, 345.2, "2026-08-10", "1130", "NPP", "VIIRS", 82, 3.4, "D"),
+    (32.20, 34.60, 311.0, "2026-08-10", "1035", "NPP", "VIIRS", 64, 1.2, "D"),
+    (32.10, 34.75, 355.8, "2026-08-10", "0830", "NPP", "VIIRS", 98, 6.1, "D"),
+    (31.85, 34.95, 290.4, "2026-08-10", "0935", "NOAA-21", "VIIRS", 40, 0.7, "D"),
+    (32.30, 34.85, 302.7, "2026-08-09", "2315", "NPP", "VIIRS", "h", 1.8, "N"),
+]
+
+console = Console()
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def bearing_deg(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    x = math.sin(dl) * math.cos(p2)
+    y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def compass(deg):
+    dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    return dirs[int((deg + 22.5) // 45) % 8]
+
+
+def age_minutes(acq_date, acq_time):
+    try:
+        acq = dt.datetime.strptime(f"{acq_date} {acq_time}", "%Y-%m-%d %H%M")
+        acq = acq.replace(tzinfo=dt.timezone.utc)
+        return max(0, int((dt.datetime.now(dt.timezone.utc) - acq).total_seconds() / 60))
+    except ValueError:
+        return -1
+
+
+def local_str(acq_date, acq_time):
+    try:
+        acq = dt.datetime.strptime(f"{acq_date} {acq_time}", "%Y-%m-%d %H%M")
+        acq = acq.replace(tzinfo=dt.timezone.utc)
+        return acq.astimezone().strftime("%H:%M")
+    except ValueError:
+        return "--:--"
+
+
+def load_config():
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_config(cfg):
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    except OSError:
+        pass
+
+
+def bbox(lat, lon, radius):
+    dlat = radius / 111.32
+    dlon = radius / (111.32 * math.cos(math.radians(lat)))
+    return lon - dlon, lat - dlat, lon + dlon, lat + dlat
+
+
+def fetch_fires(key, src, lat, lon, radius, days):
+    """Fetch FIRMS CSV for one source (or all, merged) and return parsed fires."""
+    west, south, east, north = bbox(lat, lon, radius)
+
+    def fetch_one(one_src):
+        url = API.format(key=key, src=one_src, west=west, south=south,
+                         east=east, north=north, days=days)
+        req = urllib.request.Request(url, headers={"User-Agent": "firewatch/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return parse_csv(resp.read().decode("utf-8"), lat, lon)
+
+    if src == "ALL":
+        with ThreadPoolExecutor(max_workers=len(MULTI_SRCS)) as ex:
+            lists = list(ex.map(fetch_one, MULTI_SRCS))
+        return merge_fires([f for sub in lists for f in sub])
+    return fetch_one(src)
+
+
+def merge_fires(fires, km=1.5):
+    """Cluster nearby detections — the same fire seen by several satellites —
+    keeping the strongest reading and tracking which satellites saw it."""
+    merged = []
+    for f in sorted(fires, key=lambda x: x["frp"], reverse=True):
+        for m in merged:
+            if haversine_km(f["lat"], f["lon"], m["lat"], m["lon"]) <= km:
+                m["sats"].add(f["sat"])
+                break
+        else:
+            f["sats"] = {f["sat"]}
+            merged.append(f)
+    return merged
+
+
+def sats_str(f):
+    sats = f.get("sats") or {f.get("sat", "?")}
+    return ",".join(sorted({SATS.get(s, s[:3]) for s in sats}))
+
+
+def src_label(src):
+    if src == "ALL":
+        return "4 satellites (VIIRS+MODIS)"
+    return src.replace("_NRT", "")
+
+
+_ADMIN_PREFIX = re.compile(
+    r"^(?:Δήμος|Περιφερειακή Ενότητα|Δημοτική Ενότητα|Περιφέρεια|"
+    r"Municipality of|City of|Region of|District of|County of)\s+")
+
+
+def place_name(place):
+    """Short human place name from a Nominatim result: town/city if available,
+    otherwise municipality/county with Greek/English admin prefixes stripped."""
+    a = place.get("address") or {}
+    for key in ("city", "town", "village", "municipality", "county", "state"):
+        v = a.get(key)
+        if v:
+            n = _ADMIN_PREFIX.sub("", v).strip()
+            if n:
+                return n
+    parts = [p.strip() for p in place.get("display_name", "").split(",") if p.strip()]
+    return parts[1] if len(parts) > 1 else (place.get("name") or "custom")
+
+
+def geocode_zip(code, country):
+    qs = urllib.parse.urlencode({
+        "format": "json", "postalcode": code, "country": country, "limit": 1,
+        "addressdetails": 1,
+    })
+    req = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/search?{qs}",
+        headers={"User-Agent": "firewatch/1.0 (Termux)"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not data:
+        raise ValueError(f"no place found for postal code {code} in {country}")
+    place = data[0]
+    return float(place["lat"]), float(place["lon"]), place_name(place)
+
+
+def gps_location(timeout=30):
+    """Device GPS via termux-api. Returns (lat, lon, accuracy_m)."""
+    import shutil
+    import subprocess
+    if not shutil.which("termux-location"):
+        raise ValueError(
+            "termux-location not found — run: pkg install termux-api  "
+            "(and install the Termux:API app from F-Droid)")
+    last = "unknown"
+    for extra, tmo in ((["-p", "gps"], timeout), (["-p", "network"], 15), ([], 10)):
+        try:
+            out = subprocess.run(["termux-location", *extra], capture_output=True,
+                                 text=True, timeout=tmo)
+        except subprocess.TimeoutExpired:
+            last = "GPS fix timed out"
+            continue
+        if out.returncode != 0:
+            last = out.stderr.strip() or "provider error"
+            continue
+        try:
+            data = json.loads(out.stdout)
+        except json.JSONDecodeError:
+            last = "unexpected output"
+            continue
+        if data.get("latitude") is not None and data.get("longitude") is not None:
+            return (float(data["latitude"]), float(data["longitude"]),
+                    float(data.get("accuracy") or 0))
+        last = "no coordinates"
+    raise ValueError(f"no GPS fix ({last}) — grant location permission to Termux")
+
+
+def gps_name(accuracy):
+    return f"gps (\u00b1{accuracy:.0f} m)" if accuracy else "gps"
+
+
+def parse_csv(text, center_lat, center_lon):
+    rows = list(csv.DictReader(text.splitlines()))
+    fires = []
+    for r in rows:
+        try:
+            lat, lon = float(r["latitude"]), float(r["longitude"])
+        except (KeyError, ValueError):
+            continue
+        brightness = r.get("bright_ti4") or r.get("brightness") or "0"
+        fires.append({
+            "lat": lat,
+            "lon": lon,
+            "bright": float(brightness),
+            "frp": float(r.get("frp", 0) or 0),
+            "conf": r.get("confidence", ""),
+            "sat": r.get("satellite", ""),
+            "instrument": r.get("instrument", ""),
+            "daynight": r.get("daynight", ""),
+            "acq_date": r.get("acq_date", ""),
+            "acq_time": r.get("acq_time", "0000"),
+            "dist": haversine_km(center_lat, center_lon, lat, lon),
+            "bearing": bearing_deg(center_lat, center_lon, lat, lon),
+        })
+    return fires
+
+
+def demo_fires(center_lat, center_lon):
+    return [{
+        "lat": lat, "lon": lon, "bright": bright, "frp": frp, "conf": conf,
+        "sat": sat, "instrument": inst, "daynight": dn,
+        "acq_date": d, "acq_time": t,
+        "dist": haversine_km(center_lat, center_lon, lat, lon),
+        "bearing": bearing_deg(center_lat, center_lon, lat, lon),
+    } for lat, lon, bright, d, t, sat, inst, conf, frp, dn in DEMO_FIRES]
+
+
+def friendly_age(age_min):
+    if age_min < 0:
+        return "unknown"
+    if age_min < 60:
+        return f"{age_min} min"
+    if age_min < 24 * 60:
+        h = age_min // 60
+        return f"{h} hr" + ("s" if h > 1 else "")
+    return f"{age_min // 1440} day" + ("s" if age_min >= 2880 else "")
+
+
+def friendly_dir(deg):
+    return ["north", "northeast", "east", "southeast", "south",
+            "southwest", "west", "northwest"][int((deg + 22.5) // 45) % 8]
+
+
+def conf_word(conf):
+    try:
+        v = float(conf)
+    except (TypeError, ValueError):
+        c = str(conf).lower()
+        return "high" if c.startswith("h") else "low" if c.startswith("l") else "nominal"
+    return "high" if v >= 80 else "nominal" if v >= 50 else "low"
+
+
+def size_label(f):
+    if f["frp"] >= 10:
+        return "LARGE", "bold red"
+    if f["frp"] >= 2 or f["bright"] >= 330:
+        return "medium", "yellow"
+    return "small", "dim"
+
+
+def risk_style(f):
+    d = f["dist"]
+    if d < 5:
+        return "bold red"
+    if d < WARN_KM:
+        return "yellow"
+    if d < 30:
+        return "cyan"
+    return ""
+
+
+def build_table(fires, ctx, expert=False):
+    fires = sorted(fires, key=lambda f: f["dist"])
+    if expert:
+        t = Table(expand=True, box=None, pad_edge=False)
+        for col, justify in [("#", "right"), ("time", "right"), ("age", "right"),
+                             ("dist", "right"), ("dir", "center"), ("bright", "right"),
+                             ("frp", "right"), ("sats", "center"), ("conf", "right"),
+                             ("D/N", "center"), ("lat", "right"), ("lon", "right")]:
+            t.add_column(col, justify=justify, style="cyan" if col == "dist" else None)
+        for i, f in enumerate(fires[:25], 1):
+            age = age_minutes(f["acq_date"], f["acq_time"])
+            cw = conf_word(f["conf"])
+            t.add_row(
+                str(i),
+                local_str(f["acq_date"], f["acq_time"]),
+                f"{age:>4}m" if age >= 0 else "--",
+                f"{f['dist']:6.1f}",
+                compass(f["bearing"]),
+                f"{f['bright']:5.0f}",
+                f"{f['frp']:4.1f}",
+                Text(sats_str(f), style="cyan" if len(f.get("sats") or {f.get("sat", "?")}) > 1 else "dim"),
+                Text(cw, style="green" if cw == "high" else "yellow" if cw == "nominal" else "dim"),
+                f["daynight"],
+                f"{f['lat']:.3f}",
+                f"{f['lon']:.3f}",
+                style="bold" if i <= 3 else None,
+            )
+        return t
+
+    t = Table(expand=True, box=None, pad_edge=False)
+    for col, justify in [("#", "right"), ("detected", "right"), ("ago", "right"),
+                         ("distance", "right"), ("direction", "left"), ("size", "center"),
+                         ("confidence", "left"), ("sats", "center")]:
+        t.add_column(col, justify=justify, style="cyan" if col == "distance" else None)
+    for i, f in enumerate(fires[:25], 1):
+        age = age_minutes(f["acq_date"], f["acq_time"])
+        size, size_style = size_label(f)
+        cw = conf_word(f["conf"])
+        conf_style = "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"
+        row_style = ("bold " if i <= 3 else "") + risk_style(f)
+        t.add_row(
+            str(i),
+            local_str(f["acq_date"], f["acq_time"]),
+            friendly_age(age),
+            f"{f['dist']:.1f} km",
+            friendly_dir(f["bearing"]),
+            Text(size, style=size_style),
+            Text(cw, style=conf_style),
+            Text(sats_str(f), style="cyan" if len(f.get("sats") or {f.get("sat", "?")}) > 1 else "dim"),
+            style=row_style.strip() or None,
+        )
+    return t
+
+
+def status_text(fires, ctx, nearest):
+    if not fires:
+        return (f"[green]✅ All clear[/] — no fires detected within "
+                f"[bold]{ctx['radius']:.0f} km[/] of [bold]{ctx['area']}[/]")
+    age = age_minutes(nearest["acq_date"], nearest["acq_time"])
+    return (f"[bold red]🔥 {len(fires)} fire{'s' if len(fires) > 1 else ''} detected[/] "
+            f"within [bold]{ctx['radius']:.0f} km[/] of [bold]{ctx['area']}[/] — "
+            f"closest about [bold]{nearest['dist']:.1f} km[/] to the "
+            f"{friendly_dir(nearest['bearing'])}, detected {friendly_age(age)} ago")
+
+
+def risk_gauge(fires):
+    """One-line threat gauge from the closest fire's distance and intensity."""
+    nearest = min((f for f in fires), key=lambda f: f["dist"], default=None)
+    if nearest is None:
+        return "[green]risk: ● calm — no active fires[/green]"
+    d = nearest["dist"]
+    big = nearest["frp"] >= 10
+    if d < 5 or (d < WARN_KM and big):
+        word, style, frac = "🔥 DANGER", "bold red", 1.0
+    elif d < WARN_KM:
+        word, style, frac = "⚠ close", "yellow", 0.7
+    elif d < 30:
+        word, style, frac = "● watch", "cyan", 0.4
+    else:
+        word, style, frac = "● calm", "green", 0.2
+    bar = "█" * round(frac * 10) + "░" * (10 - round(frac * 10))
+    return f"[{style}]risk: {bar} {word}[/{style}]"
+
+
+def mini_map(fires, ctx, width=25, height=9):
+    """ASCII map of the scanned area: ◎ you · x fires (✕ big) · · radius ring."""
+    cx, cy = ctx["lat"], ctx["lon"]
+    r = ctx["radius"]
+    dlat = r / 111.32
+    dlon = r / (111.32 * math.cos(math.radians(cx)))
+    step_lat = 2 * dlat / (height - 1)
+    step_lon = 2 * dlon / (width - 1)
+    ring_tol = max(step_lat * 111.32, step_lon * 111.32 * math.cos(math.radians(cx))) / 2
+    rows = []
+    for i in range(height):
+        lat = cx + dlat - i * step_lat
+        line = Text()
+        for j in range(width):
+            lon = cy - dlon + j * step_lon
+            f = next((x for x in fires
+                      if abs(x["lat"] - lat) <= step_lat / 2
+                      and abs(x["lon"] - lon) <= step_lon / 2), None)
+            if f is not None:
+                ch = "✕" if f["frp"] >= 10 else "x"
+                line.append(ch, style="bold red" if f["frp"] >= 2 else "yellow")
+            elif i == height // 2 and j == width // 2:
+                line.append("◎", style="bold cyan")
+            elif abs(haversine_km(cx, cy, lat, lon) - r) <= ring_tol:
+                line.append("·", style="dim")
+            else:
+                line.append(" ")
+        rows.append(line)
+    legend = Text("◎ you   x fire (✕ big)   · scan ring", style="dim")
+    return Panel(Group(*rows, legend), border_style="cyan",
+                 title=f"scanned area — {r:.0f} km around {ctx['area']}", title_align="left")
+
+
+def clock_line(ctx, fires):
+    ages = [age_minutes(f["acq_date"], f["acq_time"]) for f in fires]
+    ages = [a for a in ages if a >= 0]
+    last = f" · last detection {friendly_age(min(ages))} ago" if ages else ""
+    nxt = f" · next refresh {ctx['countdown']}s" if ctx.get("countdown") else ""
+    return f"[dim]🕐 {ctx.get('clock') or ctx['updated']:%H:%M:%S} · data {ctx['updated']:%H:%M:%S}{last}{nxt}[/dim]"
+
+
+def snapshot(fires, ctx, error=None, expert=False):
+    nearest = min((f for f in fires), key=lambda f: f["dist"], default=None)
+    warn = nearest is not None and nearest["dist"] < WARN_KM
+    lines = [status_text(fires, ctx, nearest)]
+    if warn:
+        age = age_minutes(nearest["acq_date"], nearest["acq_time"])
+        lines.insert(0, f"[bold white on red]⚠ CLOSE FIRE — about {nearest['dist']:.1f} km "
+                        f"{friendly_dir(nearest['bearing'])}, detected {friendly_age(age)} ago[/]")
+    lines.append(risk_gauge(fires))
+    lines.append(clock_line(ctx, fires))
+    lines.append(f"[dim]{ctx['area']} · {ctx['lat']:.3f}, {ctx['lon']:.3f} · radius {ctx['radius']:.0f} km · "
+                 f"{src_label(ctx['src'])} · checked {ctx['updated']:%H:%M:%S}[/dim]")
+    if error:
+        lines.append(f"[red]error: {error}[/red]")
+    header = Panel("\n".join(lines), border_style="red" if warn else "cyan",
+                   title="🔥 FIREWATCH", title_align="left")
+    parts = [header]
+    parts.append(mini_map(fires, ctx))
+    if fires:
+        title = f"{len(fires)} hotspot{'s' if len(fires) > 1 else ''} — closest first"
+        if expert:
+            title += " (expert view)"
+        parts.append(Panel(build_table(fires, ctx, expert), border_style="cyan",
+                           title=title, title_align="left"))
+    return Group(*parts)
+
+
+def parse_area(args, cfg):
+    if args.area and args.area.lower() in PRESETS:
+        lat, lon = PRESETS[args.area.lower()]
+        return args.area.lower(), lat, lon
+    if args.lat is not None and args.lon is not None:
+        name = args.area or "custom"
+        return name, args.lat, args.lon
+    if cfg.get("lat") is not None and cfg.get("lon") is not None:
+        return cfg.get("area", "custom"), cfg["lat"], cfg["lon"]
+    name = cfg.get("area") or "athens"
+    lat, lon = PRESETS.get(name, PRESETS["athens"])
+    return name, lat, lon
+
+
+def apply_zip(args, cfg):
+    """Geocode --zip into (lat, lon, name); returns error string or None."""
+    if not args.zip:
+        return None, None, None, None
+    country = args.country or cfg.get("country") or "Greece"
+    try:
+        lat, lon, name = geocode_zip(args.zip.strip(), country)
+    except Exception as e:
+        return None, None, None, f"postal code {args.zip} in {country}: {e}"
+    return lat, lon, name, None
+
+
+def run_once(args, cfg):
+    key = args.key or os.environ.get("FIRMS_API_KEY") or DEFAULT_KEY
+    area, lat, lon = parse_area(args, cfg)
+    zlat, zlon, zname, zerr = apply_zip(args, cfg)
+    if zerr:
+        console.print(f"[red]error: {zerr}[/red]")
+        return 1
+    if zlat is not None:
+        area, lat, lon = zname, zlat, zlon
+    elif args.gps:
+        try:
+            glat, glon, gacc = gps_location()
+        except Exception as e:
+            console.print(f"[red]error: {e}[/red]")
+            return 1
+        area, lat, lon = gps_name(gacc), glat, glon
+    src_key = args.source
+    src = SOURCES[src_key]
+    radius = args.radius or cfg.get("radius") or 60
+    radius = min(radius, MAX_RADIUS[src])
+    now = dt.datetime.now()
+    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src, updated=now, clock=now)
+    error = None
+    if args.demo:
+        fires = demo_fires(lat, lon)
+    elif not key:
+        fires = []
+        error = "No API key. Set FIRMS_API_KEY or pass --key. Get one free at https://earthdata.nasa.gov"
+    else:
+        try:
+            fires = fetch_fires(key, src, lat, lon, radius, args.days)
+        except Exception as e:
+            fires = []
+            error = f"{type(e).__name__}: {e}"
+    console.print(snapshot(fires, ctx, error))
+    return 1 if error else 0
+
+
+def run_tui(args, cfg):
+    console.clear()
+    key = args.key or os.environ.get("FIRMS_API_KEY") or DEFAULT_KEY
+    area, lat, lon = parse_area(args, cfg)
+    country = args.country or cfg.get("country") or "Greece"
+    zlat, zlon, zname, zerr = apply_zip(args, cfg)
+    if zlat is not None:
+        area, lat, lon = zname, zlat, zlon
+    src_key = args.source
+    src = SOURCES[src_key]
+    radius = min(args.radius or cfg.get("radius") or 60, MAX_RADIUS[src])
+    interval = args.interval
+
+    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src,
+               updated=dt.datetime.now())
+    fires, error = [], None
+    countdown = 0
+    detail = False
+
+    if args.gps and zlat is None:
+        try:
+            glat, glon, gacc = gps_location()
+            area, lat, lon = gps_name(gacc), glat, glon
+        except Exception as e:
+            error = f"GPS: {e}"
+
+    def fetch_once():
+        """Return (fires, error) for the current area/radius/source."""
+        try:
+            if args.demo:
+                return demo_fires(lat, lon), None
+            if not key:
+                return [], "No API key. Set FIRMS_API_KEY or pass --key. Get one free at https://earthdata.nasa.gov"
+            text = fetch_fires(key, src, lat, lon, radius, args.days)
+            return parse_csv(text, lat, lon), None
+        except Exception as e:
+            return [], f"{type(e).__name__}: {e}"
+
+    fetch_seq = 0
+
+    def start_fetch():
+        # fetch in a daemon thread so keypresses never block on the network;
+        # results from superseded zoom/area/source presses are dropped
+        nonlocal fetch_seq
+        fetch_seq += 1
+        seq = fetch_seq
+
+        def work():
+            nonlocal fires, error
+            new_fires, new_err = fetch_once()
+            if seq == fetch_seq:
+                ctx["updated"] = dt.datetime.now()
+                fires, error = new_fires, new_err
+
+        threading.Thread(target=work, daemon=True).start()
+
+    fires, error = fetch_once()
+
+    fd = sys.stdin.fileno()
+    saved_tty = None
+    if sys.stdin.isatty():
+        import termios
+        import tty
+        saved_tty = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+    try:
+        with Live(console=console, auto_refresh=False, screen=False) as live:
+            def show():
+                footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
+                          f"[cyan]z[/] zip · [cyan]g[/] gps · [cyan]s[/] src · "
+                          f"[cyan]d[/] {'expert' if detail else 'simple'} · "
+                          f"[cyan]+[/]/[cyan]-[/] zoom"
+                          if key or args.demo else
+                          f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
+                          f"[cyan]+[/]/[cyan]-[/] radius   [dim]no API key — data off[/]")
+                ctx["countdown"] = max(countdown, 0)
+                ctx["clock"] = dt.datetime.now()
+                live.update(Panel(snapshot(fires, ctx, error, detail), border_style="cyan",
+                                  title=footer, title_align="left"))
+                live.refresh()
+
+            def refetch():
+                nonlocal countdown
+                ctx.update(area=area, lat=lat, lon=lon, radius=radius, src=src)
+                start_fetch()
+                countdown = interval
+                show()
+
+            while True:
+                countdown -= 1
+                show()
+
+                if countdown <= 0:
+                    refetch()
+
+                r, _, _ = select.select([fd], [], [], 1)
+                if not r:
+                    continue
+                # raw fd read: sys.stdin.read(1) buffers extra queued bytes,
+                # which then never become visible to select() again
+                ch = os.read(fd, 1).decode("latin-1", errors="replace")
+                if ch in ("q", "\x03"):
+                    save_config({"area": area, "lat": lat, "lon": lon,
+                                 "radius": radius, "source": src_key})
+                    break
+                if ch == "r":
+                    refetch()
+                if ch == "c":
+                    names = list(PRESETS)
+                    idx = names.index(area) if area in names else -1
+                    area = names[(idx + 1) % len(names)]
+                    lat, lon = PRESETS[area]
+                    save_config({"area": area, "radius": radius, "source": src_key})
+                    refetch()
+                if ch == "+":
+                    radius = max(round(radius / ZOOM), MIN_RADIUS)
+                    refetch()
+                if ch == "-":
+                    radius = min(round(radius * ZOOM), MAX_RADIUS[src])
+                    refetch()
+                if ch == "s":
+                    keys = list(SOURCES)
+                    src_key = keys[(keys.index(src_key) + 1) % len(keys)]
+                    src = SOURCES[src_key]
+                    radius = min(radius, MAX_RADIUS[src])
+                    save_config({"area": area, "radius": radius, "source": src_key})
+                    refetch()
+                if ch == "d":
+                    detail = not detail
+                    show()
+                if ch == "z":
+                    live.stop()
+                    if saved_tty is not None:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
+                    try:
+                        raw = input(f"postal code (country: {country}) e.g. 10563 or 75001,France: ").strip()
+                    except EOFError:
+                        raw = ""
+                    if saved_tty is not None:
+                        tty.setcbreak(fd)
+                    live.start()
+                    if not raw:
+                        continue
+                    code, _, ctry = raw.partition(",")
+                    ctry = ctry.strip() or country
+                    try:
+                        nlat, nlon, nname = geocode_zip(code.strip(), ctry)
+                    except Exception as e:
+                        error = f"postal code {code} in {ctry}: {e}"
+                        continue
+                    area, lat, lon, country = nname, nlat, nlon, ctry
+                    error = None
+                    save_config({"area": area, "lat": lat, "lon": lon, "country": country,
+                                 "radius": radius, "source": src_key})
+                    refetch()
+                if ch == "g":
+                    live.stop()
+                    if saved_tty is not None:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
+                    try:
+                        print("acquiring GPS fix (up to ~30 s)...", flush=True)
+                        glat, glon, gacc = gps_location()
+                        area, lat, lon = gps_name(gacc), glat, glon
+                        error = None
+                        save_config({"area": area, "lat": lat, "lon": lon,
+                                     "radius": radius, "source": src_key})
+                    except Exception as e:
+                        error = f"GPS: {e}"
+                    finally:
+                        if saved_tty is not None:
+                            tty.setcbreak(fd)
+                        live.start()
+                    refetch()
+    finally:
+        if saved_tty is not None:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Live fire hotspot monitor (NASA FIRMS)")
+    ap.add_argument("--area", help="preset area: " + ", ".join(PRESETS) + " (default from config)")
+    ap.add_argument("--lat", type=float, help="custom center latitude")
+    ap.add_argument("--lon", type=float, help="custom center longitude")
+    ap.add_argument("--zip", help="set area by postal code (e.g. 10563)")
+    ap.add_argument("--gps", action="store_true",
+                    help="use device GPS (needs termux-api: pkg install termux-api)")
+    ap.add_argument("--country", help="country for postal codes (default Greece)")
+    ap.add_argument("--radius", type=float, help="radius in km (default 60)")
+    ap.add_argument("--source", choices=SOURCES, default="viirs",
+                    help="satellite: viirs, noaa20, noaa21, modis, or all (merge + cross-check)")
+    ap.add_argument("--days", type=int, default=1, help="days of data (1-10)")
+    ap.add_argument("--interval", type=int, default=300, help="refresh seconds (default 300)")
+    ap.add_argument("--key", help="FIRMS API key (or env FIRMS_API_KEY)")
+    ap.add_argument("--once", action="store_true", help="print one snapshot and exit")
+    ap.add_argument("--demo", action="store_true", help="use bundled sample data (offline)")
+    args = ap.parse_args()
+
+    cfg = load_config()
+    if args.demo:
+        args.key = "demo"
+    try:
+        sys.exit(run_once(args, cfg) if args.once else run_tui(args, cfg))
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
