@@ -410,28 +410,43 @@ def risk_style(f):
     return ""
 
 
+def two_line(main, detail, style=None):
+    """Two-line table cell: main value on top, dim detail underneath."""
+    t = Text()
+    t.append(main, style=style)
+    t.append("\n" + detail, style="dim")
+    return t
+
+
 def build_table(fires, ctx, expert=False):
+    """Fires list — one row per fire, two lines: main values on top,
+    detail (date, coords, units, sat) dim underneath."""
     fires = sorted(fires, key=lambda f: f["dist"])
     if expert:
         t = Table(expand=True, box=None, pad_edge=False)
         for col, justify in [("#", "right"), ("time", "right"), ("age", "right"),
                              ("dist", "right"), ("dir", "center"), ("bright", "right"),
-                             ("frp", "right"), ("sats", "center"), ("conf", "right"),
-                             ("D/N", "center"), ("lat", "right"), ("lon", "right")]:
-            t.add_column(col, justify=justify, style="cyan" if col == "dist" else None)
+                             ("frp", "right"), ("sat", "center"), ("conf", "right"),
+                             ("DN", "center"), ("lat", "right"), ("lon", "right")]:
+            t.add_column(col, justify=justify,
+                         style="cyan" if col == "dist" else None)
         for i, f in enumerate(fires[:25], 1):
             age = age_minutes(f["acq_date"], f["acq_time"])
             cw = conf_word(f["conf"])
+            sats = f.get("sats") or {f.get("sat", "?")}
+            utc = (f"{f['acq_time'][:2]}:{f['acq_time'][2:]}Z"
+                   if len(f.get("acq_time", "")) == 4 else "--")
             t.add_row(
                 str(i),
-                local_str(f["acq_date"], f["acq_time"]),
-                f"{age:>4}m" if age >= 0 else "--",
+                two_line(local_str(f["acq_date"], f["acq_time"]), f["acq_date"][5:] or "--"),
+                two_line(f"{age:>4}m" if age >= 0 else "--", utc),
                 f"{f['dist']:6.1f}",
                 compass(f["bearing"]),
                 f"{f['bright']:5.0f}",
-                f"{f['frp']:4.1f}",
-                Text(sats_str(f), style="cyan" if len(f.get("sats") or {f.get("sat", "?")}) > 1 else "dim"),
-                Text(cw, style="green" if cw == "high" else "yellow" if cw == "nominal" else "dim"),
+                f"{f['frp']:.1f}",
+                Text(sats_str(f), style="cyan" if len(sats) > 1 else "dim"),
+                two_line(cw, str(f["conf"]),
+                         "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"),
                 f["daynight"],
                 f"{f['lat']:.3f}",
                 f"{f['lon']:.3f}",
@@ -450,17 +465,19 @@ def build_table(fires, ctx, expert=False):
         cw = conf_word(f["conf"])
         conf_style = "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"
         near = near_str(f)
+        sats = f.get("sats") or {f.get("sat", "?")}
         row_style = ("bold " if i <= 3 else "") + risk_style(f)
         t.add_row(
             str(i),
-            local_str(f["acq_date"], f["acq_time"]),
-            friendly_age(age),
-            f"{f['dist']:.1f} km",
-            friendly_dir(f["bearing"]),
-            Text(near, style="dim" if near == "…" else None),
-            Text(size, style=size_style),
-            Text(cw, style=conf_style),
-            Text(sats_str(f), style="cyan" if len(f.get("sats") or {f.get("sat", "?")}) > 1 else "dim"),
+            two_line(local_str(f["acq_date"], f["acq_time"]), f["acq_date"][5:] or "--"),
+            two_line(friendly_age(age), f"{f['bright']:.0f} K"),
+            two_line(f"{f['dist']:.1f} km", f"{f['lat']:.2f},{f['lon']:.2f}"),
+            two_line(friendly_dir(f["bearing"]), f"{f['bearing']:.0f}\u00b0"),
+            two_line(near, f.get("instrument", "") or "--", "dim" if near == "…" else None),
+            two_line(size, f"{f['frp']:.1f} MW", size_style),
+            two_line(cw, str(f["conf"]), conf_style),
+            two_line(sats_str(f), f["daynight"] or "--",
+                     "cyan" if len(sats) > 1 else "dim"),
             style=row_style.strip() or None,
         )
     return t
