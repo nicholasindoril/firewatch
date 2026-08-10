@@ -590,8 +590,7 @@ def run_tui(args, cfg):
                 return demo_fires(lat, lon), None
             if not key:
                 return [], "No API key. Set FIRMS_API_KEY or pass --key. Get one free at https://earthdata.nasa.gov"
-            text = fetch_fires(key, src, lat, lon, radius, args.days)
-            return parse_csv(text, lat, lon), None
+            return fetch_fires(key, src, lat, lon, radius, args.days), None
         except Exception as e:
             return [], f"{type(e).__name__}: {e}"
 
