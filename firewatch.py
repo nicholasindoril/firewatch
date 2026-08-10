@@ -622,7 +622,10 @@ def run_tui(args, cfg):
         saved_tty = termios.tcgetattr(fd)
         tty.setcbreak(fd)
     try:
-        with Live(console=console, auto_refresh=False, screen=False) as live:
+        # screen=True (alternate screen, like htop): full clean redraw every
+        # refresh — in-place cursor erase leaves stacked copies when the panel
+        # is taller than the terminal (Termux)
+        with Live(console=console, auto_refresh=False, screen=True) as live:
             def show():
                 footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
                           f"[cyan]z[/] zip · [cyan]g[/] gps · [cyan]s[/] src · "
@@ -732,6 +735,9 @@ def run_tui(args, cfg):
     finally:
         if saved_tty is not None:
             termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
+        # alt screen restores the shell on exit — leave the last view visible
+        console.print(Panel(snapshot(fires, ctx, error, detail), border_style="cyan",
+                            title="firewatch — last view", title_align="left"))
 
 
 def main():
