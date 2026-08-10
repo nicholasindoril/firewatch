@@ -26,10 +26,12 @@ import datetime as dt
 import json
 import math
 import os
+import queue
 import re
 import select
 import sys
 import threading
+import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -226,6 +228,73 @@ def geocode_zip(code, country):
     return float(place["lat"]), float(place["lon"]), place_name(place)
 
 
+GEO_CACHE_PATH = Path.home() / ".config" / "firewatch-geo.json"
+geo_places = {}
+geo_queue = queue.Queue()
+geo_seen = set()
+
+
+def load_geo_cache():
+    try:
+        return json.loads(GEO_CACHE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+geo_places = load_geo_cache()
+
+
+def save_geo_cache():
+    try:
+        GEO_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GEO_CACHE_PATH.write_text(json.dumps(geo_places, ensure_ascii=False, indent=1))
+    except OSError:
+        pass
+
+
+def geocode_reverse(lat, lon):
+    """Nearest place name for fire coordinates, e.g. 'Αμφίπολη ·62052'."""
+    qs = urllib.parse.urlencode({"lat": f"{lat:.5f}", "lon": f"{lon:.5f}",
+                                 "format": "jsonv2", "addressdetails": "1", "zoom": 14})
+    req = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/reverse?{qs}",
+        headers={"User-Agent": "firewatch/1.0 (Termux)"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        place = json.loads(resp.read().decode("utf-8"))
+    name = place_name(place) or f"{lat:.2f}, {lon:.2f}"
+    code = (place.get("address") or {}).get("postcode")
+    return f"{name} ·{code}" if code else name
+
+
+def fire_place_key(f):
+    return f"{f['lat']:.3f},{f['lon']:.3f}"
+
+
+def near_str(f):
+    return geo_places.get(fire_place_key(f), "…")
+
+
+def queue_fire_places(fires):
+    for f in fires:
+        key = fire_place_key(f)
+        if key not in geo_places and key not in geo_seen:
+            geo_seen.add(key)
+            geo_queue.put(key)
+
+
+def geo_worker():
+    while True:
+        key = geo_queue.get()
+        if key not in geo_places:
+            lat, lon = (float(v) for v in key.split(","))
+            try:
+                geo_places[key] = geocode_reverse(lat, lon)
+            except Exception:
+                geo_places[key] = f"{lat:.2f}, {lon:.2f}"
+            save_geo_cache()
+        time.sleep(1.1)  # Nominatim: max ~1 request per second
+
+
 def gps_location(timeout=30):
     """Device GPS via termux-api. Returns (lat, lon, accuracy_m)."""
     import shutil
@@ -372,14 +441,15 @@ def build_table(fires, ctx, expert=False):
 
     t = Table(expand=True, box=None, pad_edge=False)
     for col, justify in [("#", "right"), ("detected", "right"), ("ago", "right"),
-                         ("distance", "right"), ("direction", "left"), ("size", "center"),
-                         ("confidence", "left"), ("sats", "center")]:
+                         ("distance", "right"), ("direction", "left"), ("near", "left"),
+                         ("size", "center"), ("confidence", "left"), ("sats", "center")]:
         t.add_column(col, justify=justify, style="cyan" if col == "distance" else None)
     for i, f in enumerate(fires[:25], 1):
         age = age_minutes(f["acq_date"], f["acq_time"])
         size, size_style = size_label(f)
         cw = conf_word(f["conf"])
         conf_style = "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"
+        near = near_str(f)
         row_style = ("bold " if i <= 3 else "") + risk_style(f)
         t.add_row(
             str(i),
@@ -387,6 +457,7 @@ def build_table(fires, ctx, expert=False):
             friendly_age(age),
             f"{f['dist']:.1f} km",
             friendly_dir(f["bearing"]),
+            Text(near, style="dim" if near == "…" else None),
             Text(size, style=size_style),
             Text(cw, style=conf_style),
             Text(sats_str(f), style="cyan" if len(f.get("sats") or {f.get("sat", "?")}) > 1 else "dim"),
@@ -609,10 +680,13 @@ def run_tui(args, cfg):
             if seq == fetch_seq:
                 ctx["updated"] = dt.datetime.now()
                 fires, error = new_fires, new_err
+                queue_fire_places(new_fires)
 
         threading.Thread(target=work, daemon=True).start()
 
+    threading.Thread(target=geo_worker, daemon=True).start()
     fires, error = fetch_once()
+    queue_fire_places(fires)
 
     fd = sys.stdin.fileno()
     saved_tty = None
