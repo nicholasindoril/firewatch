@@ -16,7 +16,7 @@ Usage:
   python firewatch.py --demo           # offline demo with sample data
 
 Keys: q quit · r refresh now · c cycle area preset · z postal code · g GPS
-      · h heading mode · + / - radius
+      · h heading mode · [ / ] adjust offset · + / - radius
 Env:  FIRMS_API_KEY (or pass --key)
 """
 
@@ -644,6 +644,21 @@ def mini_map(fires, ctx, width=None, height=None):
     center_row, center_col = dots_v // 2, dots_h // 2
     ring_tol = max(step_lat * 111.32, step_lon * 111.32 * cos_clat) * 1.5
 
+    # Heading arrow marker on the ring
+    heading = ctx.get("heading")
+    heading_dots = {}
+    if heading is not None:
+        h_rad = math.radians(heading)
+        ring_r = dots_v // 2
+        ring_c = dots_h // 2
+        h_row = int(center_row - ring_r * math.cos(h_rad))
+        h_col = int(center_col + ring_c * math.sin(h_rad))
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rp, cp = h_row + dr, h_col + dc
+                if 0 <= rp < dots_v and 0 <= cp < dots_h:
+                    heading_dots[(rp, cp)] = True
+
     # Braille dot → (row_offset, col_offset) within a 4×2 sub-cell
     DOT_RC = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1), (3, 0), (3, 1)]
 
@@ -674,7 +689,7 @@ def mini_map(fires, ctx, width=None, height=None):
 
             bits = 0
             bg = None
-            has_fire, has_ring = False, False
+            has_fire, has_heading, has_ring = False, False, False
 
             for di, (dr, dc) in enumerate(DOT_RC):
                 ri, ci = base_r + dr, base_c + dc
@@ -686,6 +701,11 @@ def mini_map(fires, ctx, width=None, height=None):
                     bits |= (1 << di)
                     has_fire = True
                     bg = fire_bg(fd)
+                    continue
+
+                if (ri, ci) in heading_dots:
+                    bits |= (1 << di)
+                    has_heading = True
                     continue
 
                 dx = (lon - cy) * 111.32 * cos_clat
@@ -700,6 +720,8 @@ def mini_map(fires, ctx, width=None, height=None):
             ch = chr(0x2800 + bits)
             if has_fire:
                 style = f"bold white {bg}"
+            elif has_heading:
+                style = "bold yellow"
             else:
                 style = "dim"
             line.append(ch, style=style)
@@ -719,6 +741,18 @@ def mini_map(fires, ctx, width=None, height=None):
     return Panel(map_content, border_style="cyan", expand=True,
                  title=f"scanned area — {r:.0f} km around {ctx['area']}",
                  title_align="left")
+
+
+def sparkline(counts, width=18):
+    """Mini trendline from fire-count history using Unicode blocks."""
+    if not counts or len(counts) < 2:
+        return ""
+    bars = "▁▂▃▄▅▆▇█"
+    recent = counts[-width:]
+    mn, mx = min(recent), max(recent)
+    if mn == mx:
+        return bars[0] * len(recent)
+    return "".join(bars[min(7, int((v - mn) / (mx - mn) * 7))] for v in recent)
 
 
 def clock_line(ctx, fires):
@@ -741,6 +775,8 @@ def snapshot(fires, ctx, error=None, expert=False):
                         f"{friendly_dir(nearest['bearing'])}, detected {friendly_age(age)} ago[/]")
     lines.append(risk_gauge(fires))
     lines.append(clock_line(ctx, fires))
+    if ctx.get("spark"):
+        lines.append(f"[dim]{ctx['spark']}[/]")
     if heading is not None:
         lines.append(f"📱 heading [bold]{heading:.0f}° {heading_compass(heading)}[/]"
                      f"{'  offset ' + str(offset) + '°' if offset else ''}")
@@ -843,6 +879,7 @@ def run_tui(args, cfg):
     fires, error = [], None
     countdown = 0
     detail = False
+    fire_history = []  # fire counts for sparkline
 
     # heading / compass state
     heading_active = args.heading or cfg.get("heading", False)
@@ -910,12 +947,16 @@ def run_tui(args, cfg):
             if seq == fetch_seq:
                 ctx["updated"] = dt.datetime.now()
                 fires, error = new_fires, new_err
+                fire_history.append(len(new_fires))
+                if len(fire_history) > 60:
+                    fire_history[:] = fire_history[-60:]
                 queue_fire_places(new_fires)
 
         threading.Thread(target=work, daemon=True).start()
 
     threading.Thread(target=geo_worker, daemon=True).start()
     fires, error = fetch_once()
+    fire_history.append(len(fires))
     queue_fire_places(fires)
 
     fd = sys.stdin.fileno()
@@ -934,11 +975,14 @@ def run_tui(args, cfg):
                 with heading_lock:
                     ctx["heading"] = heading_val if heading_active else None
                     ctx["heading_offset"] = heading_offset
-                h_tag = "[bold yellow]h[/] heading" if heading_active else "[cyan]h[/] heading"
+                ctx["spark"] = sparkline(fire_history)
+                h_tag = ("[bold yellow]h[/] heading[/]"
+                         if heading_active else "[cyan]h[/] heading")
+                offset_hint = " \\[ \\] adj" if heading_active else ""
                 footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
                           f"[cyan]z[/] zip · [cyan]g[/] gps · [cyan]s[/] src · "
                           f"[cyan]d[/] {'expert' if detail else 'simple'} · "
-                          f"{h_tag} · "
+                          f"{h_tag}{offset_hint} · "
                           f"[cyan]+[/]/[cyan]-[/] zoom"
                           if key or args.demo else
                           f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
@@ -1016,6 +1060,20 @@ def run_tui(args, cfg):
                             heading_val = h
                             heading_offset = args.offset or cfg.get("heading_offset", 0)
                             heading_thread = start_heading_thread()
+                    save_config({"area": area, "lat": lat, "lon": lon,
+                                 "radius": radius, "source": src_key,
+                                 "heading": heading_active,
+                                 "heading_offset": heading_offset})
+                    show()
+                if ch in ("[", "{") and heading_active:
+                    heading_offset = (heading_offset - 5) % 360
+                    save_config({"area": area, "lat": lat, "lon": lon,
+                                 "radius": radius, "source": src_key,
+                                 "heading": heading_active,
+                                 "heading_offset": heading_offset})
+                    show()
+                if ch in ("]", "}") and heading_active:
+                    heading_offset = (heading_offset + 5) % 360
                     save_config({"area": area, "lat": lat, "lon": lon,
                                  "radius": radius, "source": src_key,
                                  "heading": heading_active,
