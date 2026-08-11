@@ -16,7 +16,7 @@ Usage:
   python firewatch.py --demo           # offline demo with sample data
 
 Keys: q quit · r refresh now · c cycle area preset · z postal code · g GPS
-      · + / - radius
+      · h heading mode · + / - radius
 Env:  FIRMS_API_KEY (or pass --key)
 """
 
@@ -38,9 +38,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
+    from rich import box
+    from rich.align import Align
     from rich.console import Console, Group
     from rich.live import Live
     from rich.panel import Panel
+    from rich.table import Table
     from rich.text import Text
 except ImportError:
     print("Missing dependency: pip install rich", file=sys.stderr)
@@ -329,6 +332,80 @@ def gps_name(accuracy):
     return f"gps (\u00b1{accuracy:.0f} m)" if accuracy else "gps"
 
 
+def get_heading(timeout=3):
+    """Read phone compass azimuth (0-360°, north=0) via termux-sensor.
+    Returns (azimuth_degrees, error_msg_or_None)."""
+    import shutil
+    import subprocess
+    if not shutil.which("termux-sensor"):
+        return None, "install termux-api: pkg install termux-api"
+    sensors = ["Orientation", "Rotation Vector",
+               "Game Rotation Vector", "Geomagnetic Rotation Vector"]
+    for sensor in sensors:
+        try:
+            out = subprocess.run(
+                ["termux-sensor", "-s", sensor, "-n", "1"],
+                capture_output=True, text=True, timeout=timeout)
+            if out.returncode != 0:
+                continue
+            data = json.loads(out.stdout)
+            vals = data.get(sensor, {}).get("values", [])
+            if vals and len(vals) >= 1 and vals[0] is not None:
+                azimuth = float(vals[0])
+                if sensor.startswith("Rotation"):
+                    azimuth = math.degrees(azimuth) % 360
+                return azimuth % 360, None
+        except (subprocess.TimeoutExpired, json.JSONDecodeError,
+                ValueError, OSError):
+            continue
+    return None, "no orientation sensor available"
+
+
+def heading_compass(deg):
+    """8-point compass from heading."""
+    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][
+        int((deg + 22.5) // 45) % 8]
+
+
+def relative_bearing(true_bearing, heading, offset=0):
+    """Fire bearing relative to phone heading (0° = ahead)."""
+    h = (heading + offset) % 360
+    return (true_bearing - h + 360) % 360
+
+
+def relative_dir(rel_deg):
+    """Relative direction arrow from bearing (0° = ahead)."""
+    if rel_deg < 22.5 or rel_deg >= 337.5:
+        return "↑ ahead"
+    if rel_deg < 67.5:
+        return "↗ R"
+    if rel_deg < 112.5:
+        return "→ R"
+    if rel_deg < 157.5:
+        return "↘ R"
+    if rel_deg < 202.5:
+        return "↓ back"
+    if rel_deg < 247.5:
+        return "↙ L"
+    if rel_deg < 292.5:
+        return "← L"
+    return "↖ L"
+
+
+def compass_bar(heading, offset=0):
+    """One-line compass with phone heading highlighted (Rich markup string)."""
+    h = (heading + offset) % 360
+    marks = [" N ", "NE ", " E ", "SE ", " S ", "SW ", " W ", "NW "]
+    idx = int((h + 22.5) // 45) % 8
+    parts = []
+    for i, m in enumerate(marks):
+        if i == idx:
+            parts.append(f"[bold reverse]{m}[/]")
+        else:
+            parts.append(f"[dim]{m}[/]")
+    return "".join(parts)
+
+
 def parse_csv(text, center_lat, center_lon):
     rows = list(csv.DictReader(text.splitlines()))
     fires = []
@@ -409,52 +486,93 @@ def risk_style(f):
     return ""
 
 
-def fire_lines(fires, ctx, expert=False):
-    """Fire list without column headers: two lines per fire separated by
-    " · ". Line 1 = time · place · intensity · distance (risk-styled),
-    line 2 (dim) = remaining details, latest update last. Plain text
-    wraps instead of truncating, so nothing ever gets cut off."""
-    parts = []
-    for i, f in enumerate(sorted(fires, key=lambda f: f["dist"])[:25]):
+def fire_lines(fires, ctx, expert=False, max_fires=25, heading=None, offset=0):
+    """Tabular fire list with aligned columns and headers, closest fire first.
+    When heading is set, Dir column shows relative bearing (↑ ahead, etc.)."""
+    table = Table(box=box.SIMPLE_HEAD, expand=False, padding=(0, 1),
+                  border_style="dim", show_header=True)
+
+    if expert:
+        table.add_column("Time", no_wrap=True)
+        table.add_column("Place", max_width=22, no_wrap=True)
+        table.add_column("Dist", justify="right", no_wrap=True)
+        table.add_column("FRP", justify="right", no_wrap=True)
+        table.add_column("Bright", justify="right", no_wrap=True)
+        table.add_column("Dir", no_wrap=True)
+        table.add_column("Conf", no_wrap=True)
+        table.add_column("Sat", no_wrap=True)
+        table.add_column("D/N", no_wrap=True)
+        table.add_column("Age", justify="right", no_wrap=True)
+    else:
+        table.add_column("Time", no_wrap=True)
+        table.add_column("Place", max_width=20, no_wrap=True)
+        table.add_column("Dist", justify="right", no_wrap=True)
+        table.add_column("Intensity", no_wrap=True)
+        table.add_column("Dir", no_wrap=True)
+        table.add_column("Detail", no_wrap=True)
+        table.add_column("Age", justify="right", no_wrap=True)
+
+    for i, f in enumerate(sorted(fires, key=lambda f: f["dist"])[:max_fires]):
         age = age_minutes(f["acq_date"], f["acq_time"])
         size, size_style = size_label(f)
         cw = conf_word(f["conf"])
         conf_style = "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"
         near = near_str(f)
         sats = f.get("sats") or {f.get("sat", "?")}
-        main = ("bold " if i < 3 else "") + risk_style(f)
+        risk = risk_style(f)
+        main = ("bold " if i < 3 else "") + risk
 
-        l1 = Text()
-        l1.append(local_str(f["acq_date"], f["acq_time"]), style=main)
-        l1.append(" · " + near, style=main + (" dim" if near == "…" else ""))
-        l1.append(" · ", style=main)
-        l1.append(size, style=size_style)
-        l1.append(f" {f['frp']:.1f} MW", style=main)
-        l1.append(" · ", style=main)
-        l1.append(f"{f['dist']:.1f} km", style=main)
+        time_cell = Text(local_str(f["acq_date"], f["acq_time"]), style=main)
+        place_cell = Text(near, style=main + (" dim" if near == "…" else ""))
+        dist_cell = Text(f"{f['dist']:.1f} km", style=main)
 
-        l2 = Text(style="dim")
-        l2.append(f["acq_date"][5:] or "--")
-        if expert:
-            l2.append(" · " + (f"{f['acq_time'][:2]}:{f['acq_time'][2:]}Z"
-                               if len(f.get("acq_time", "")) == 4 else "--"))
-        l2.append(" · " + f"{f['bright']:.0f} K")
-        l2.append(" · " + (compass(f["bearing"]) if expert else friendly_dir(f["bearing"])))
-        l2.append(" · ")
-        l2.append(cw, style=conf_style)
-        l2.append(f" {f['conf']}")
-        l2.append(" · ")
-        l2.append(sats_str(f), style="cyan" if len(sats) > 1 else None)
-        l2.append(" · " + (f["daynight"] or "--"))
-        l2.append(" · " + (f"{f['lat']:.3f},{f['lon']:.3f}" if expert
-                           else f"{f['lat']:.2f},{f['lon']:.2f}"))
-        if age < 0:
-            l2.append(" · unknown")
+        if heading is not None:
+            rel = relative_bearing(f["bearing"], heading, offset)
+            dir_str = relative_dir(rel)
+            dir_style = "bold yellow" if rel < 45 or rel >= 315 else main
         else:
-            l2.append(" · " + (f"{age}m" if expert else f"{friendly_age(age)} ago"))
-        parts.append(l1)
-        parts.append(l2)
-    return Group(*parts)
+            dir_str = compass(f["bearing"])
+            dir_style = main
+
+        if expert:
+            frp_cell = Text(f"{f['frp']:.1f}", style=main)
+            bright_cell = Text(f"{f['bright']:.0f} K", style=main)
+            dir_cell = Text(dir_str, style=dir_style)
+            conf_cell = Text(f"{cw} {f['conf']}", style=conf_style)
+            sat_cell = Text(sats_str(f),
+                            style="cyan" if len(sats) > 1 else main)
+            dn_cell = Text(f["daynight"] or "--", style=main)
+            age_str = f"{age}m" if age >= 0 else "?"
+            age_cell = Text(age_str, style=main)
+            table.add_row(time_cell, place_cell, dist_cell, frp_cell,
+                          bright_cell, dir_cell, conf_cell, sat_cell,
+                          dn_cell, age_cell)
+        else:
+            intensity = Text()
+            intensity.append(size, style=size_style)
+            intensity.append(f" {f['frp']:.1f}MW", style=main)
+            dir_cell = Text(dir_str, style=dir_style)
+            detail = Text()
+            detail.append(cw, style=conf_style)
+            detail.append(" ")
+            detail.append(sats_str(f),
+                          style="cyan" if len(sats) > 1 else None)
+            detail.append(" ")
+            detail.append(f["daynight"] or "--")
+            # compact age: "21h" / "5m" / "2d"
+            if age < 0:
+                age_str = "?"
+            elif age < 60:
+                age_str = f"{age}m"
+            elif age < 1440:
+                age_str = f"{age // 60}h"
+            else:
+                age_str = f"{age // 1440}d"
+            age_cell = Text(age_str, style=main)
+            table.add_row(time_cell, place_cell, dist_cell, intensity,
+                          dir_cell, detail, age_cell)
+
+    return table
 
 
 def status_text(fires, ctx, nearest):
@@ -487,37 +605,120 @@ def risk_gauge(fires):
     return f"[{style}]risk: {bar} {word}[/{style}]"
 
 
-def mini_map(fires, ctx, width=25, height=9):
-    """ASCII map of the scanned area: ◎ you · x fires (✕ big) · · radius ring."""
+def mini_map(fires, ctx, width=None, height=None):
+    """Braille heat-map: 2×4 dots per character for smooth circles.
+    Background color maps fire intensity (red→orange→yellow).
+    Adapts to terminal size on each render."""
+    if width is None:
+        width = max(30, min(console.width - 6, 70))
+    if height is None:
+        height = max(6, min(20, (console.height - 22) // 2))
     cx, cy = ctx["lat"], ctx["lon"]
     r = ctx["radius"]
     dlat = r / 111.32
     dlon = r / (111.32 * math.cos(math.radians(cx)))
-    step_lat = 2 * dlat / (height - 1)
-    step_lon = 2 * dlon / (width - 1)
-    ring_tol = max(step_lat * 111.32, step_lon * 111.32 * math.cos(math.radians(cx))) / 2
+    cos_clat = math.cos(math.radians(cx))
+
+    dots_h = width * 2    # each braille char = 2 horizontal dots
+    dots_v = height * 4   # each braille char = 4 vertical dots
+    step_lat = 2 * dlat / max(dots_v - 1, 1)
+    step_lon = 2 * dlon / max(dots_h - 1, 1)
+
+    # Map fires to dot clusters (small radius for visibility)
+    fire_dots = {}
+    fire_radius = 3  # dots from center
+    for f in fires:
+        fcol = int((f["lon"] - (cy - dlon)) / step_lon)
+        frow = int(((cx + dlat) - f["lat"]) / step_lat)
+        for dr in range(-fire_radius, fire_radius + 1):
+            for dc in range(-fire_radius, fire_radius + 1):
+                d = math.sqrt(dr * dr + dc * dc)
+                if d > fire_radius:
+                    continue
+                row, col = frow + dr, fcol + dc
+                if 0 <= row < dots_v and 0 <= col < dots_h:
+                    k = (row, col)
+                    if k not in fire_dots or f["frp"] > fire_dots[k]["frp"]:
+                        fire_dots[k] = f
+
+    center_row, center_col = dots_v // 2, dots_h // 2
+    ring_tol = max(step_lat * 111.32, step_lon * 111.32 * cos_clat) * 1.5
+
+    # Braille dot → (row_offset, col_offset) within a 4×2 sub-cell
+    DOT_RC = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1), (3, 0), (3, 1)]
+
+    def fire_bg(f):
+        frp = f["frp"]
+        if frp >= 10:
+            return "on #cc2200"
+        if frp >= 5:
+            return "on #ee5500"
+        if frp >= 2:
+            return "on #ee8800"
+        return "on #cc9900"
+
     rows = []
-    for i in range(height):
-        lat = cx + dlat - i * step_lat
+    for char_row in range(height):
         line = Text()
-        for j in range(width):
-            lon = cy - dlon + j * step_lon
-            f = next((x for x in fires
-                      if abs(x["lat"] - lat) <= step_lat / 2
-                      and abs(x["lon"] - lon) <= step_lon / 2), None)
-            if f is not None:
-                ch = "✕" if f["frp"] >= 10 else "x"
-                line.append(ch, style="bold red" if f["frp"] >= 2 else "yellow")
-            elif i == height // 2 and j == width // 2:
-                line.append("◎", style="bold cyan")
-            elif abs(haversine_km(cx, cy, lat, lon) - r) <= ring_tol:
-                line.append("·", style="dim")
-            else:
+        for char_col in range(width):
+            base_r = char_row * 4
+            base_c = char_col * 2
+
+            # If this cell covers the center, show a full block marker
+            if (base_r <= center_row < base_r + 4 and
+                    base_c <= center_col < base_c + 2):
+                ch = "\u28ff"  # full braille block
+                style = "bold cyan"
+                line.append(ch, style=style)
+                continue
+
+            bits = 0
+            bg = None
+            has_fire, has_ring = False, False
+
+            for di, (dr, dc) in enumerate(DOT_RC):
+                ri, ci = base_r + dr, base_c + dc
+                lat = cx + dlat - ri * step_lat
+                lon = cy - dlon + ci * step_lon
+
+                fd = fire_dots.get((ri, ci))
+                if fd:
+                    bits |= (1 << di)
+                    has_fire = True
+                    bg = fire_bg(fd)
+                    continue
+
+                dx = (lon - cy) * 111.32 * cos_clat
+                dy = (lat - cx) * 111.32
+                if abs(math.sqrt(dx * dx + dy * dy) - r) <= ring_tol:
+                    bits |= (1 << di)
+
+            if bits == 0:
                 line.append(" ")
+                continue
+
+            ch = chr(0x2800 + bits)
+            if has_fire:
+                style = f"bold white {bg}"
+            else:
+                style = "dim"
+            line.append(ch, style=style)
         rows.append(line)
-    legend = Text("◎ you   x fire (✕ big)   · scan ring", style="dim")
-    return Panel(Group(*rows, legend), border_style="cyan",
-                 title=f"scanned area — {r:.0f} km around {ctx['area']}", title_align="left")
+
+    legend = Text("", style="dim")
+    legend.append("◎ you   ")
+    legend.append("⣿", style="bold white on #cc2200")
+    legend.append(" large   ")
+    legend.append("⣿", style="bold white on #ee8800")
+    legend.append(" medium   ")
+    legend.append("⣿", style="bold white on #cc9900")
+    legend.append(" small   ")
+    legend.append("· ring")
+
+    map_content = Align.center(Group(*rows, legend))
+    return Panel(map_content, border_style="cyan", expand=True,
+                 title=f"scanned area — {r:.0f} km around {ctx['area']}",
+                 title_align="left")
 
 
 def clock_line(ctx, fires):
@@ -529,6 +730,8 @@ def clock_line(ctx, fires):
 
 
 def snapshot(fires, ctx, error=None, expert=False):
+    heading = ctx.get("heading")
+    offset = ctx.get("heading_offset", 0)
     nearest = min((f for f in fires), key=lambda f: f["dist"], default=None)
     warn = nearest is not None and nearest["dist"] < WARN_KM
     lines = [status_text(fires, ctx, nearest)]
@@ -538,6 +741,10 @@ def snapshot(fires, ctx, error=None, expert=False):
                         f"{friendly_dir(nearest['bearing'])}, detected {friendly_age(age)} ago[/]")
     lines.append(risk_gauge(fires))
     lines.append(clock_line(ctx, fires))
+    if heading is not None:
+        lines.append(f"📱 heading [bold]{heading:.0f}° {heading_compass(heading)}[/]"
+                     f"{'  offset ' + str(offset) + '°' if offset else ''}")
+        lines.append(compass_bar(heading, offset))
     lines.append(f"[dim]{ctx['area']} · {ctx['lat']:.3f}, {ctx['lon']:.3f} · radius {ctx['radius']:.0f} km · "
                  f"{src_label(ctx['src'])} · checked {ctx['updated']:%H:%M:%S}[/dim]")
     if error:
@@ -548,10 +755,9 @@ def snapshot(fires, ctx, error=None, expert=False):
     parts.append(mini_map(fires, ctx))
     if fires:
         title = f"{len(fires)} hotspot{'s' if len(fires) > 1 else ''} — closest first"
-        if expert:
-            title += " (expert view)"
-        parts.append(Panel(fire_lines(fires, ctx, expert), border_style="cyan",
-                           title=title, title_align="left"))
+        max_fires = max(3, min(25, console.height - 18))
+        parts.append(Panel(fire_lines(fires, ctx, expert, max_fires, heading, offset),
+                           border_style="cyan", title=title, title_align="left"))
     return Group(*parts)
 
 
@@ -638,6 +844,39 @@ def run_tui(args, cfg):
     countdown = 0
     detail = False
 
+    # heading / compass state
+    heading_active = args.heading or cfg.get("heading", False)
+    heading_offset = args.offset or cfg.get("heading_offset", 0)
+    heading_val = None
+    heading_err = None
+    heading_lock = threading.Lock()
+    heading_stop = threading.Event()
+
+    def heading_poller():
+        nonlocal heading_val, heading_err
+        while not heading_stop.is_set():
+            h, e = get_heading(timeout=2)
+            with heading_lock:
+                heading_val = h
+                heading_err = e if h is None else None
+            time.sleep(1.5)
+
+    def start_heading_thread():
+        heading_stop.clear()
+        t = threading.Thread(target=heading_poller, daemon=True)
+        t.start()
+        return t
+
+    heading_thread = None
+    if heading_active:
+        h, herr = get_heading()
+        if herr:
+            error = f"heading sensor: {herr}"
+            heading_active = False
+        else:
+            heading_val = h
+            heading_thread = start_heading_thread()
+
     if args.gps and zlat is None:
         try:
             glat, glon, gacc = gps_location()
@@ -692,9 +931,14 @@ def run_tui(args, cfg):
         # is taller than the terminal (Termux)
         with Live(console=console, auto_refresh=False, screen=True) as live:
             def show():
+                with heading_lock:
+                    ctx["heading"] = heading_val if heading_active else None
+                    ctx["heading_offset"] = heading_offset
+                h_tag = "[bold yellow]h[/] heading" if heading_active else "[cyan]h[/] heading"
                 footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
                           f"[cyan]z[/] zip · [cyan]g[/] gps · [cyan]s[/] src · "
                           f"[cyan]d[/] {'expert' if detail else 'simple'} · "
+                          f"{h_tag} · "
                           f"[cyan]+[/]/[cyan]-[/] zoom"
                           if key or args.demo else
                           f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
@@ -726,8 +970,11 @@ def run_tui(args, cfg):
                 # which then never become visible to select() again
                 ch = os.read(fd, 1).decode("latin-1", errors="replace")
                 if ch in ("q", "\x03"):
+                    heading_stop.set()
                     save_config({"area": area, "lat": lat, "lon": lon,
-                                 "radius": radius, "source": src_key})
+                                 "radius": radius, "source": src_key,
+                                 "heading": heading_active,
+                                 "heading_offset": heading_offset})
                     break
                 if ch == "r":
                     refetch()
@@ -753,6 +1000,26 @@ def run_tui(args, cfg):
                     refetch()
                 if ch == "d":
                     detail = not detail
+                    show()
+                if ch == "h":
+                    if heading_active:
+                        heading_stop.set()
+                        heading_active = False
+                        with heading_lock:
+                            heading_val = None
+                    else:
+                        h, herr = get_heading()
+                        if herr:
+                            error = f"heading sensor: {herr}"
+                        else:
+                            heading_active = True
+                            heading_val = h
+                            heading_offset = args.offset or cfg.get("heading_offset", 0)
+                            heading_thread = start_heading_thread()
+                    save_config({"area": area, "lat": lat, "lon": lon,
+                                 "radius": radius, "source": src_key,
+                                 "heading": heading_active,
+                                 "heading_offset": heading_offset})
                     show()
                 if ch == "z":
                     live.stop()
@@ -798,9 +1065,11 @@ def run_tui(args, cfg):
                         live.start()
                     refetch()
     finally:
+        heading_stop.set()
         if saved_tty is not None:
             termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
-        # alt screen restores the shell on exit — leave the last view visible
+        ctx["heading"] = heading_val if heading_active else None
+        ctx["heading_offset"] = heading_offset
         console.print(Panel(snapshot(fires, ctx, error, detail), border_style="cyan",
                             title="firewatch — last view", title_align="left"))
 
@@ -820,6 +1089,10 @@ def main():
     ap.add_argument("--days", type=int, default=1, help="days of data (1-10)")
     ap.add_argument("--interval", type=int, default=300, help="refresh seconds (default 300)")
     ap.add_argument("--key", help="FIRMS API key (or env FIRMS_API_KEY)")
+    ap.add_argument("--heading", action="store_true",
+                    help="use phone compass to orient radar (needs termux-api)")
+    ap.add_argument("--offset", type=float, default=0,
+                    help="compass calibration offset in degrees (e.g. --offset -5)")
     ap.add_argument("--once", action="store_true", help="print one snapshot and exit")
     ap.add_argument("--demo", action="store_true", help="use bundled sample data (offline)")
     args = ap.parse_args()
