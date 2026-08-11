@@ -328,7 +328,16 @@ def gps_location(timeout=30):
     raise ValueError(f"no GPS fix ({last}) — grant location permission to Termux")
 
 
-def gps_name(accuracy):
+def gps_name(accuracy, lat=None, lon=None):
+    """Build GPS area label, reverse-geocoding if coordinates given."""
+    if lat is not None and lon is not None:
+        try:
+            place = geocode_reverse(lat, lon)
+            if accuracy:
+                return f"{place} (gps ±{accuracy:.0f}m)"
+            return f"{place} (gps)"
+        except Exception:
+            pass
     return f"gps (\u00b1{accuracy:.0f} m)" if accuracy else "gps"
 
 
@@ -845,7 +854,7 @@ def run_once(args, cfg):
         except Exception as e:
             console.print(f"[red]error: {e}[/red]")
             return 1
-        area, lat, lon = gps_name(gacc), glat, glon
+        area = gps_name(gacc, glat, glon); lat, lon = glat, glon
     src_key = args.source
     src = SOURCES[src_key]
     radius = args.radius or cfg.get("radius") or 60
@@ -932,7 +941,7 @@ def run_tui(args, cfg):
     if args.gps and zlat is None:
         try:
             glat, glon, gacc = gps_location()
-            area, lat, lon = gps_name(gacc), glat, glon
+            area = gps_name(gacc, glat, glon); lat, lon = glat, glon
         except Exception as e:
             error = f"GPS: {e}"
 
@@ -1126,7 +1135,7 @@ def run_tui(args, cfg):
                     try:
                         print("acquiring GPS fix (up to ~30 s)...", flush=True)
                         glat, glon, gacc = gps_location()
-                        area, lat, lon = gps_name(gacc), glat, glon
+                        area = gps_name(gacc, glat, glon); lat, lon = glat, glon
                         error = None
                         save_config({"area": area, "lat": lat, "lon": lon,
                                      "radius": radius, "source": src_key})
