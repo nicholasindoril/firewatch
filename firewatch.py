@@ -41,7 +41,6 @@ try:
     from rich.console import Console, Group
     from rich.live import Live
     from rich.panel import Panel
-    from rich.table import Table
     from rich.text import Text
 except ImportError:
     print("Missing dependency: pip install rich", file=sys.stderr)
@@ -410,77 +409,52 @@ def risk_style(f):
     return ""
 
 
-def two_line(main, detail, style=None):
-    """Two-line table cell: main value on top, dim detail underneath."""
-    t = Text()
-    t.append(main, style=style)
-    t.append("\n" + detail, style="dim")
-    return t
-
-
-def build_table(fires, ctx, expert=False):
-    """Fires list — one row per fire, two lines: main values on top,
-    detail (date, coords, units, sat) dim underneath."""
-    fires = sorted(fires, key=lambda f: f["dist"])
-    if expert:
-        t = Table(expand=True, box=None, pad_edge=False)
-        for col, justify in [("#", "right"), ("time", "right"), ("age", "right"),
-                             ("dist", "right"), ("dir", "center"), ("bright", "right"),
-                             ("frp", "right"), ("sat", "center"), ("conf", "right"),
-                             ("DN", "center"), ("lat", "right"), ("lon", "right")]:
-            t.add_column(col, justify=justify,
-                         style="cyan" if col == "dist" else None)
-        for i, f in enumerate(fires[:25], 1):
-            age = age_minutes(f["acq_date"], f["acq_time"])
-            cw = conf_word(f["conf"])
-            sats = f.get("sats") or {f.get("sat", "?")}
-            utc = (f"{f['acq_time'][:2]}:{f['acq_time'][2:]}Z"
-                   if len(f.get("acq_time", "")) == 4 else "--")
-            t.add_row(
-                str(i),
-                two_line(local_str(f["acq_date"], f["acq_time"]), f["acq_date"][5:] or "--"),
-                two_line(f"{age:>4}m" if age >= 0 else "--", utc),
-                f"{f['dist']:6.1f}",
-                compass(f["bearing"]),
-                f"{f['bright']:5.0f}",
-                f"{f['frp']:.1f}",
-                Text(sats_str(f), style="cyan" if len(sats) > 1 else "dim"),
-                two_line(cw, str(f["conf"]),
-                         "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"),
-                f["daynight"],
-                f"{f['lat']:.3f}",
-                f"{f['lon']:.3f}",
-                style="bold" if i <= 3 else None,
-            )
-        return t
-
-    t = Table(expand=True, box=None, pad_edge=False)
-    for col, justify in [("#", "right"), ("detected", "right"), ("ago", "right"),
-                         ("distance", "right"), ("direction", "left"), ("near", "left"),
-                         ("size", "center"), ("confidence", "left"), ("sats", "center")]:
-        t.add_column(col, justify=justify, style="cyan" if col == "distance" else None)
-    for i, f in enumerate(fires[:25], 1):
+def fire_lines(fires, ctx, expert=False):
+    """Fire list without column headers: two lines per fire separated by
+    " · ". Line 1 = time · place · intensity · distance (risk-styled),
+    line 2 (dim) = remaining details, latest update last. Plain text
+    wraps instead of truncating, so nothing ever gets cut off."""
+    parts = []
+    for i, f in enumerate(sorted(fires, key=lambda f: f["dist"])[:25]):
         age = age_minutes(f["acq_date"], f["acq_time"])
         size, size_style = size_label(f)
         cw = conf_word(f["conf"])
         conf_style = "green" if cw == "high" else "yellow" if cw == "nominal" else "dim"
         near = near_str(f)
         sats = f.get("sats") or {f.get("sat", "?")}
-        row_style = ("bold " if i <= 3 else "") + risk_style(f)
-        t.add_row(
-            str(i),
-            two_line(local_str(f["acq_date"], f["acq_time"]), f["acq_date"][5:] or "--"),
-            two_line(friendly_age(age), f"{f['bright']:.0f} K"),
-            two_line(f"{f['dist']:.1f} km", f"{f['lat']:.2f},{f['lon']:.2f}"),
-            two_line(friendly_dir(f["bearing"]), f"{f['bearing']:.0f}\u00b0"),
-            two_line(near, f.get("instrument", "") or "--", "dim" if near == "…" else None),
-            two_line(size, f"{f['frp']:.1f} MW", size_style),
-            two_line(cw, str(f["conf"]), conf_style),
-            two_line(sats_str(f), f["daynight"] or "--",
-                     "cyan" if len(sats) > 1 else "dim"),
-            style=row_style.strip() or None,
-        )
-    return t
+        main = ("bold " if i < 3 else "") + risk_style(f)
+
+        l1 = Text()
+        l1.append(local_str(f["acq_date"], f["acq_time"]), style=main)
+        l1.append(" · " + near, style=main + (" dim" if near == "…" else ""))
+        l1.append(" · ", style=main)
+        l1.append(size, style=size_style)
+        l1.append(f" {f['frp']:.1f} MW", style=main)
+        l1.append(" · ", style=main)
+        l1.append(f"{f['dist']:.1f} km", style=main)
+
+        l2 = Text(style="dim")
+        l2.append(f["acq_date"][5:] or "--")
+        if expert:
+            l2.append(" · " + (f"{f['acq_time'][:2]}:{f['acq_time'][2:]}Z"
+                               if len(f.get("acq_time", "")) == 4 else "--"))
+        l2.append(" · " + f"{f['bright']:.0f} K")
+        l2.append(" · " + (compass(f["bearing"]) if expert else friendly_dir(f["bearing"])))
+        l2.append(" · ")
+        l2.append(cw, style=conf_style)
+        l2.append(f" {f['conf']}")
+        l2.append(" · ")
+        l2.append(sats_str(f), style="cyan" if len(sats) > 1 else None)
+        l2.append(" · " + (f["daynight"] or "--"))
+        l2.append(" · " + (f"{f['lat']:.3f},{f['lon']:.3f}" if expert
+                           else f"{f['lat']:.2f},{f['lon']:.2f}"))
+        if age < 0:
+            l2.append(" · unknown")
+        else:
+            l2.append(" · " + (f"{age}m" if expert else f"{friendly_age(age)} ago"))
+        parts.append(l1)
+        parts.append(l2)
+    return Group(*parts)
 
 
 def status_text(fires, ctx, nearest):
@@ -576,7 +550,7 @@ def snapshot(fires, ctx, error=None, expert=False):
         title = f"{len(fires)} hotspot{'s' if len(fires) > 1 else ''} — closest first"
         if expert:
             title += " (expert view)"
-        parts.append(Panel(build_table(fires, ctx, expert), border_style="cyan",
+        parts.append(Panel(fire_lines(fires, ctx, expert), border_style="cyan",
                            title=title, title_align="left"))
     return Group(*parts)
 
