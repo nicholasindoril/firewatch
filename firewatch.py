@@ -339,8 +339,9 @@ def get_heading(timeout=3):
     import subprocess
     if not shutil.which("termux-sensor"):
         return None, "install termux-api: pkg install termux-api"
-    sensors = ["Orientation", "Rotation Vector",
-               "Game Rotation Vector", "Geomagnetic Rotation Vector"]
+    # Sensor names match termux-sensor -l output (UPPERCASE with underscores)
+    sensors = ["ORIENTATION", "ROTATION_VECTOR",
+               "GAME_ROTATION_VECTOR", "GEOMAGNETIC_ROTATION_VECTOR"]
     for sensor in sensors:
         try:
             out = subprocess.run(
@@ -351,12 +352,18 @@ def get_heading(timeout=3):
             data = json.loads(out.stdout)
             vals = data.get(sensor, {}).get("values", [])
             if vals and len(vals) >= 1 and vals[0] is not None:
-                azimuth = float(vals[0])
-                if sensor.startswith("Rotation"):
-                    azimuth = math.degrees(azimuth) % 360
-                return azimuth % 360, None
+                if "ROTATION" in sensor or "GEOMAGNETIC" in sensor:
+                    # Quaternion [x, y, z, w] → azimuth
+                    x, y, z, w = float(vals[0]), float(vals[1]), float(vals[2]), float(vals[3])
+                    sin = 2.0 * (w * z + x * y)
+                    cos = 1.0 - 2.0 * (y * y + z * z)
+                    azimuth = math.degrees(math.atan2(sin, cos)) % 360
+                else:
+                    # ORIENTATION returns [azimuth, pitch, roll]
+                    azimuth = float(vals[0]) % 360
+                return azimuth, None
         except (subprocess.TimeoutExpired, json.JSONDecodeError,
-                ValueError, OSError):
+                ValueError, OSError, IndexError):
             continue
     return None, "no orientation sensor available"
 
