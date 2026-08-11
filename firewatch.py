@@ -857,6 +857,14 @@ def run_once(args, cfg):
         except Exception as e:
             fires = []
             error = f"{type(e).__name__}: {e}"
+    if args.heading:
+        h, herr = get_heading()
+        if herr:
+            error = (error + "; " if error else "") + f"heading: {herr}"
+        else:
+            ctx["heading"] = h
+            ctx["heading_offset"] = args.offset or cfg.get("heading_offset", 0)
+    ctx["spark"] = sparkline([len(fires)])
     console.print(snapshot(fires, ctx, error))
     return 1 if error else 0
 
