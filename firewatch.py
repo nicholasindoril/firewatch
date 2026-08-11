@@ -991,7 +991,7 @@ def run_tui(args, cfg):
                     ctx["heading"] = heading_val if heading_active else None
                     ctx["heading_offset"] = heading_offset
                 ctx["spark"] = sparkline(fire_history)
-                h_tag = ("[bold yellow]h[/] heading[/]"
+                h_tag = ("[bold yellow]h heading[/]"
                          if heading_active else "[cyan]h[/] heading")
                 offset_hint = " \\[ \\] adj" if heading_active else ""
                 footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
