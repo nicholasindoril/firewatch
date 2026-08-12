@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#f5f5f7" id="themecolor">
+<meta name="theme-color" content="#ffffff" id="themecolor">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>firewatch</title>
 <style>
 :root{
+  color-scheme:dark;
   --bg:#0d0d0f; --panel:#131316; --line:#26262b;
   --txt:#c8c8cd; --dim:#6a6a72;
   --red:#ff4141; --orange:#ff7a3c; --yellow:#ffd23f; --green:#2ee06e; --cyan:#2fd9c8;
@@ -21,16 +22,17 @@
   --thead-bg:rgba(13,13,15,.94);
 }
 [data-theme="light"]{
-  --bg:#f5f5f7; --panel:#ffffff; --line:#e4e4e7;
-  --txt:#1c1c22; --dim:#8a8a96;
-  --red:#d12020; --orange:#e06020; --yellow:#9a7800; --green:#1a8040; --cyan:#1a7068;
-  --btn-bg:#f0f0f3; --btn-border:#d4d4d8; --btn-active:#e0e0e5;
+  color-scheme:light;
+  --bg:#ffffff; --panel:#ffffff; --line:#d4d4d8;
+  --txt:#111118; --dim:#787880;
+  --red:#cc1a1a; --orange:#d4551a; --yellow:#8a6d00; --green:#1a7040; --cyan:#1a6058;
+  --btn-bg:#f4f4f5; --btn-border:#d4d4d8; --btn-active:#e4e4e7;
   --input-bg:#ffffff; --input-border:#d4d4d8;
-  --list-bg:transparent; --list-border:#e8e8ec; --list-fire-bg:rgba(255,65,65,.04);
-  --status-bg:linear-gradient(90deg,rgba(255,122,60,.03),transparent);
-  --body-bg:#f5f5f7;
-  --radar-bg:#eef0f2; --radar-rim:rgba(30,140,80,0.25); --radar-tick:rgba(30,140,80,0.25);
-  --thead-bg:rgba(245,245,247,.94);
+  --list-bg:transparent; --list-border:#e4e4e7; --list-fire-bg:rgba(220,30,30,.05);
+  --status-bg:linear-gradient(90deg,rgba(220,80,40,.04),transparent);
+  --body-bg:#ffffff;
+  --radar-bg:#f0f2f4; --radar-rim:rgba(30,130,70,0.22); --radar-tick:rgba(30,130,70,0.20);
+  --thead-bg:rgba(255,255,255,.94);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden}
@@ -139,7 +141,7 @@ body{color:var(--txt);font:14px/1.45 monospace;display:flex;flex-direction:colum
 var API = 'https://script.google.com/macros/s/AKfycbwiA5CmmxSGT02wvNUjYQXeAeMhh70tUHv0EUV9eHiuJqnX0VuzaHiCjv8Y1nRXdbV7mw/exec';
 
 var S = document.getElementById('statustxt');
-var VER = 18;
+var VER = 19;
 document.getElementById('ver').textContent = 'v' + VER;
 var R = document.getElementById('risk');
 var P = document.getElementById('settings');
@@ -177,7 +179,7 @@ function setTheme(t) {
   theme = t;
   localStorage.setItem('fwTheme', t);
   document.documentElement.setAttribute('data-theme', t);
-  document.getElementById('themecolor').setAttribute('content', t === 'light' ? '#f5f5f7' : '#0d0d0f');
+  document.getElementById('themecolor').setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0f');
   TILE = t === 'light' ? TILE_LIGHT : TILE_DARK;
   tileCache = {}; tileKey = ''; tileDirty = true;
   var btn = document.getElementById('themebtn');
@@ -471,7 +473,7 @@ function buildTiles(size, r, dpr) {
     tileCanvas.width = tw * dpr;
     tileCanvas.height = th * dpr;
     tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    tctx.fillStyle = theme === 'light' ? '#e8eaed' : '#101114';
+    tctx.fillStyle = theme === 'light' ? '#f0f2f4' : '#101114';
     tctx.fillRect(0, 0, tw, th);
     for (var x = x0; x <= x1; x++) {
       for (var y = y0; y <= y1; y++) {
@@ -518,7 +520,7 @@ function drawRadar(t) {
   var r = size / 2 - 16;
 
   var isLight = theme === 'light';
-  rctx.fillStyle = isLight ? '#eef0f2' : '#0b0d0e';
+  rctx.fillStyle = isLight ? '#f2f4f6' : '#0b0d0e';
   rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.fill();
 
   if (tileCanvas.width) {
@@ -633,7 +635,7 @@ function drawRadar(t) {
       rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.stroke();
     }
   } else {
-    rctx.fillStyle = theme === 'light' ? '#999' : '#3a3c42';
+    rctx.fillStyle = theme === 'light' ? '#aaa' : '#3a3c42';
     rctx.font = '12px monospace';
     rctx.textAlign = 'center';
     rctx.fillText('awaiting data', cx, cy + 4);
