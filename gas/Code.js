@@ -30,10 +30,11 @@ function doGet(e) {
   var p = e.parameter || {};
   if (p.v === 'data') return dataResponse(p);
   if (p.v === 'zip') return zipResponse(p);
-  // Serve the app as a plain top-level HTML page (not the sandboxed iframe),
-  // so the viewport meta works and phones get a real full-screen mobile layout.
-  var html = HtmlService.createHtmlOutputFromFile('Index').getContent();
-  return ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML);
+  // HtmlService is the only mode whose final response is text/html (the
+  // ContentService echo serves text/plain + nosniff, so browsers show source).
+  // The wrapper iframe has no viewport meta (980px layout on phones); the app
+  // counter-scales itself via CSS zoom in Index.html.
+  return HtmlService.createHtmlOutputFromFile('Index');
 }
 
 function json(obj) {

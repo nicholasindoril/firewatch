@@ -31,7 +31,7 @@
 <div id="settings"></div>
 <script>var API = 'https://script.google.com/macros/s/AKfycbwiA5CmmxSGT02wvNUjYQXeAeMhh70tUHv0EUV9eHiuJqnX0VuzaHiCjv8Y1nRXdbV7mw/exec';
 var S = document.getElementById('statustxt');
-var VER = 26;
+var VER = 27;
 document.getElementById('ver').textContent = 'v' + VER;
 var R = document.getElementById('risk');
 var P = document.getElementById('settings');
@@ -67,6 +67,14 @@ var IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 var DPR = window.devicePixelRatio || 1;
 var DEV_W = IS_IOS ? screen.width : screen.width / DPR;
 var DEV_H = IS_IOS ? screen.height : screen.height / DPR;
+// GAS serves the app in an iframe whose parent page has no viewport meta, so
+// phones lay it out at 980px then shrink it to ~0.4x. Counter-scale with CSS
+// zoom: the document re-lays-out at the real device width, filling the screen.
+try {
+if (DEV_W < window.innerWidth && DEV_W <= 640) {
+document.documentElement.style.zoom = window.innerWidth / DEV_W;
+}
+} catch (_) {}
 var isMobile = window.innerWidth <= 640 || DEV_W <= 640;
 var TILE_DARK = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
 var TILE_LIGHT = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
