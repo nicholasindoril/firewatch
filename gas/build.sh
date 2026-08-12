@@ -21,17 +21,15 @@ css_min = re.sub(r'\s+', ' ', css_min)
 css_min = re.sub(r'\s*([{}:;,])\s*', r'\1', css_min)
 css_min = css_min.strip()
 
-# Minify JS
-js_min = re.sub(r'//[^\n]*\n', '\n', js)
-js_min = re.sub(r'/\*.*?\*/', '', js_min, flags=re.DOTALL)
-js_min = re.sub(r'  +', ' ', js_min)
+# Minify JS (preserve // inside strings)
+js_min = re.sub(r'/\*.*?\*/', '', js, flags=re.DOTALL)
 js_min = re.sub(r'\n\s*\n', '\n', js_min)
+js_min = re.sub(r'^[ \t]+', '', js_min, flags=re.MULTILINE)
 js_min = js_min.strip()
 
 # Build with inline CSS and JS
 parts = html[:css_match.start()] + '<style>' + css_min + '</style>' + html[css_match.end():js_match.start()] + '<script>' + js_min + '</script>' + html[js_match.end():]
 parts = re.sub(r'\n\s*\n', '\n', parts)
-parts = re.sub(r'>\s+<', '><', parts)
 
 with open('Index.html', 'w') as f:
     f.write(parts)
