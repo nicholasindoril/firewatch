@@ -1,153 +1,6 @@
-<!DOCTYPE html>
-<html data-theme="light" style="color-scheme:light">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" id="themecolor">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<title>firewatch</title>
-<style>
-:root{
-  --bg:#0d0d0f; --panel:#131316; --line:#26262b;
-  --txt:#c8c8cd; --dim:#6a6a72;
-  --red:#ff4141; --orange:#ff7a3c; --yellow:#ffd23f; --green:#2ee06e; --cyan:#2fd9c8;
-  --btn-bg:#17171c; --btn-border:#3a3a42; --btn-active:#24242c;
-  --input-bg:#1a1a1f; --input-border:#3a3a42;
-  --list-bg:transparent; --list-border:#191920; --list-fire-bg:rgba(255,65,65,.07);
-  --status-bg:linear-gradient(90deg,rgba(255,122,60,.06),transparent);
-  --body-bg:radial-gradient(1200px 600px at 50% -10%,#1c1510,#0d0d0f 70%);
-  --radar-bg:#0b0d0e; --radar-rim:rgba(46,224,110,0.35); --radar-tick:rgba(46,224,110,0.4);
-  --thead-bg:rgba(13,13,15,.94);
-}
-[data-theme="light"]{
-  --bg:#ffffff; --panel:#ffffff; --line:#d4d4d8;
-  --txt:#111118; --dim:#787880;
-  --red:#cc1a1a; --orange:#d4551a; --yellow:#8a6d00; --green:#1a7040; --cyan:#1a6058;
-  --btn-bg:#e8e8ec; --btn-border:#c4c4cc; --btn-active:#dcdce0;
-  --input-bg:#ffffff; --input-border:#d4d4d8;
-  --list-bg:transparent; --list-border:#e4e4e7; --list-fire-bg:rgba(220,30,30,.05);
-  --status-bg:linear-gradient(90deg,rgba(220,80,40,.04),transparent);
-  --body-bg:#ffffff;
-  --radar-bg:#f0f2f4; --radar-rim:rgba(30,130,70,0.22); --radar-tick:rgba(30,130,70,0.20);
-  --thead-bg:rgba(255,255,255,.94);
-}
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden}
-body{color:var(--txt);font:14px/1.45 system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;
-  background:var(--body-bg);user-select:none;-webkit-user-select:none}
-#status{flex-shrink:0;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top));border-bottom:1px solid var(--line);
-  border-left:3px solid var(--orange);background:var(--status-bg);
-  display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;line-height:1.3}
-#status .clear{color:var(--green)}
-#status .alert{color:var(--red);font-weight:bold}
-#ver{flex-shrink:0;color:var(--dim);font-size:11px;border:1px solid var(--line);padding:1px 7px;border-radius:4px;white-space:nowrap}
-#risk{flex-shrink:0;padding:4px 12px;font-size:13px}
-.pill{display:inline-block;padding:1px 10px;border-radius:999px;font-size:12px}
-.pill.alert{color:var(--red);border:1px solid var(--red);background:rgba(255,65,65,.08)}
-.pill.warn{color:var(--yellow);border:1px solid var(--yellow);background:rgba(255,210,63,.07)}
-.pill.watch{color:var(--cyan);border:1px solid var(--cyan);background:rgba(47,217,200,.06)}
-.pill.clear{color:var(--green);border:1px solid var(--green);background:rgba(46,224,110,.06)}
-#radarwrap{flex-shrink:0;display:flex;flex-direction:row;justify-content:center;align-items:center;gap:12px;padding:8px 6px;border-bottom:1px solid var(--line)}
-#lbtn,#rbtn{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
-#lbtn button,#rbtn button{width:48px;height:48px;min-width:44px;min-height:44px;background:var(--btn-bg);color:var(--txt);border:1px solid var(--btn-border);border-radius:12px;cursor:pointer;touch-action:manipulation;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-family:system-ui,-apple-system,sans-serif;padding:0}
-#lbtn button:active,#rbtn button:active{background:var(--btn-active);transform:scale(0.95)}
-#lbtn button .g{font-size:15px;line-height:1}
-#rbtn button .g{font-size:20px;line-height:1}
-#lbtn button .lb,#rbtn button .lb{font-size:9px;color:var(--dim)}
-#lbtn button.busy,#rbtn button.busy,#rbtn button.on,#lbtn button.on{background:#2c3530;border-color:var(--green)}
-#radarc{display:flex;flex-direction:column;align-items:center}
-#radar{display:block;touch-action:manipulation;cursor:pointer}
-#radarlabel{color:var(--dim);font-size:11px;padding-top:2px;text-align:center;max-width:90vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#attrib{font-size:9px;color:#4a4a52;margin-top:2px}
-#attrib a{color:#4a4a52;text-decoration:none}
-@media (max-width:480px){
-  #lbtn button,#rbtn button{width:44px;height:44px}
-  #lbtn button .g{font-size:14px}
-  #rbtn button .g{font-size:17px}
-  #lbtn button .lb,#rbtn button .lb{font-size:8px}
-  #radarwrap{gap:6px;padding:4px 2px}
-  #settings{flex-direction:column;align-items:stretch}
-  #settings select,#settings input{width:100%!important}
-  #settings input#lat,#settings input#lon{width:48%!important}
-  #list th,#list td{padding:9px 4px;font-size:14px}
-  #list td.near{max-width:26vw}
-  #foot{font-size:12px;gap:4px}
-  #foot a{padding:6px 8px;min-width:40px;min-height:40px}
-  #radarlabel{font-size:10px}
-}
-#settings{flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--line);display:none;gap:8px;align-items:center;flex-wrap:wrap}
-#settings.show{display:flex}
-#settings label{color:var(--dim);font-size:12px}
-#settings select,#settings input{background:var(--input-bg);color:var(--txt);border:1px solid var(--input-border);padding:10px 10px;font:16px system-ui,-apple-system,sans-serif;border-radius:8px}
-#settings input#lat,#settings input#lon{width:90px}
-#settings input#zip{width:110px}
-#settings input#country{width:80px}
-#settings button{background:var(--btn-bg);color:var(--txt);border:1px solid var(--btn-border);padding:10px 14px;font:14px system-ui,-apple-system,sans-serif;cursor:pointer;border-radius:8px;touch-action:manipulation;min-height:44px}
-#settings button:active{background:var(--btn-active);transform:scale(0.97)}
-#settings button.on{background:#2c3530;border-color:var(--green);color:var(--green)}
-#list{flex:1;overflow-y:auto;padding:4px 4px 12px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-#list::-webkit-scrollbar{width:3px}
-#list::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;opacity:0.3}
-#list table{width:100%;border-collapse:collapse}
-#list th,#list td{padding:10px 6px;text-align:left;white-space:nowrap}
-#list thead th{position:sticky;top:0;z-index:2;color:var(--dim);font-weight:500;font-size:10px;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--line);background:var(--thead-bg)}
-#list td{border-bottom:1px solid var(--list-border);font-size:15px}
-#list td.dist{text-align:right;font-variant-numeric:tabular-nums}
-#list td.near{max-width:32vw;overflow:hidden;text-overflow:ellipsis}
-#list td.dot{width:16px;padding:0 3px}
-.sev{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3a3a40}
-.sev.warn{background:var(--yellow)}
-.sev.alert{background:var(--red);box-shadow:0 0 6px var(--red)}
-.sev.watch{background:var(--cyan)}
-#list tr.fire td{cursor:pointer}
-#list tr.fire:active td{background:var(--btn-bg)}
-#list tr.fire.alert td{color:#ffb3b3}
-#list tr.fire.alert{background:var(--list-fire-bg)}
-#list tr.fire.warn td{color:var(--yellow)}
-#list tr.detail td{border-bottom:1px solid var(--line);color:var(--dim);font-size:13px;padding:6px 6px 6px 16px}
-#list .col-time,#list .col-conf,#list .col-sat,#list .col-frp,#list .col-bright,#list .col-dn{display:table-cell}
-#foot{flex-shrink:0;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));
-  border-top:1px solid var(--line);color:var(--dim);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px}
-#foot a{color:var(--dim);text-decoration:none;padding:8px 10px;touch-action:manipulation;border-radius:8px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
-#foot a:active{background:var(--btn-bg)}
-#themebtn{font-size:20px;opacity:0.8}
-#themebtn:hover{opacity:1}
-#spark{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px;
-  animation:pulse 2s ease-in-out infinite;vertical-align:1px}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-@media (max-width:640px){
-  #list .col-time,#list .col-conf,#list .col-sat,#list .col-frp,#list .col-bright,#list .col-dn{display:none}
-  #list td.near{max-width:30vw}
-}
-</style>
-</head>
-<body>
-<div id="status"><span id="statustxt"></span><span id="ver"></span></div>
-<div id="risk"></div>
-<div id="radarwrap">
-  <div id="lbtn"></div>
-  <div id="radarc">
-    <canvas id="radar"></canvas>
-    <div id="radarlabel"></div>
-    <div id="attrib"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OSM · CARTO</a></div>
-  </div>
-  <div id="rbtn"></div>
-</div>
-<div id="list"></div>
-<div id="foot">
-  <span id="clock"></span>
-  <span id="spark"></span>
-  <a href="#" id="themebtn" style="font-size:16px">☀</a>
-  <a href="#" id="toggle">⚙</a>
-</div>
-<div id="settings"></div>
-<script>
-var API = 'https://script.google.com/macros/s/AKfycbwiA5CmmxSGT02wvNUjYQXeAeMhh70tUHv0EUV9eHiuJqnX0VuzaHiCjv8Y1nRXdbV7mw/exec';
-
+<!DOCTYPE html><html data-theme="light" style="color-scheme:light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff" id="themecolor"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><title>firewatch</title><?!= include("Styles"); ?></head><body><div id="status"><span id="statustxt"></span><span id="ver"></span></div><div id="risk"></div><div id="radarwrap"><div id="lbtn"></div><div id="radarc"><canvas id="radar"></canvas><div id="radarlabel"></div><div id="attrib"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OSM · CARTO</a></div></div><div id="rbtn"></div></div><div id="list"></div><div id="foot"><span id="clock"></span><span id="spark"></span><a href="#" id="themebtn" style="font-size:16px">☀</a><a href="#" id="toggle">⚙</a></div><div id="settings"></div><script>var API = 'https:
 var S = document.getElementById('statustxt');
-var VER = 21;
+var VER = 22;
 document.getElementById('ver').textContent = 'v' + VER;
 var R = document.getElementById('risk');
 var P = document.getElementById('settings');
@@ -158,11 +11,10 @@ var radar = document.getElementById('radar');
 var rctx = radar.getContext('2d');
 var radarlabel = document.getElementById('radarlabel');
 var spark = document.getElementById('spark');
-
 var presets = ['athens','thessaloniki','patras','heraklion','rhodes','korinthos'];
 var PCOORDS = { athens: [37.9838, 23.7275], thessaloniki: [40.6401, 22.9444],
-                patras: [38.2466, 21.7346], heraklion: [35.3387, 25.1442],
-                rhodes: [36.4349, 28.2176], korinthos: [37.9380, 22.9326] };
+ patras: [38.2466, 21.7346], heraklion: [35.3387, 25.1442],
+ rhodes: [36.4349, 28.2176], korinthos: [37.9380, 22.9326] };
 var srcs = [['viirs','VIIRS'],['noaa20','N20'],['noaa21','N21'],['modis','MODIS'],['all','ALL']];
 var state = JSON.parse(localStorage.getItem('fw') || '{}');
 if (!state.area) state.area = 'athens';
@@ -170,621 +22,577 @@ if (!state.radius) state.radius = 60;
 if (!state.src) state.src = 'viirs';
 if (!state.country) state.country = 'Greece';
 if (!state.expert) state.expert = 0;
-
 var lastData = null;
 var lastFires = [];
 var hist = JSON.parse(localStorage.getItem('fwHist') || '[]');
 var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 var theme = localStorage.getItem('fwTheme') || 'light';
-var TILE_DARK = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
-var TILE_LIGHT = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+var TILE_DARK = 'https:
+var TILE_LIGHT = 'https:
 var TILE = theme === 'light' ? TILE_LIGHT : TILE_DARK;
-var TILE_FB = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-
+var TILE_FB = 'https:
 function setTheme(t) {
-  theme = t;
-  localStorage.setItem('fwTheme', t);
-  document.documentElement.setAttribute('data-theme', t);
-  document.documentElement.style.colorScheme = t;
-  document.getElementById('themecolor').setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0f');
-  TILE = t === 'light' ? TILE_LIGHT : TILE_DARK;
-  tileCache = {}; tileKey = ''; tileDirty = true;
-  var btn = document.getElementById('themebtn');
-  if (btn) btn.textContent = t === 'light' ? '☀' : '☾';
-  if (lastData) drawRadar();
+ theme = t;
+ localStorage.setItem('fwTheme', t);
+ document.documentElement.setAttribute('data-theme', t);
+ document.documentElement.style.colorScheme = t;
+ document.getElementById('themecolor').setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0f');
+ TILE = t === 'light' ? TILE_LIGHT : TILE_DARK;
+ tileCache = {}; tileKey = ''; tileDirty = true;
+ var btn = document.getElementById('themebtn');
+ if (btn) btn.textContent = t === 'light' ? '☀' : '☾';
+ if (lastData) drawRadar();
 }
-
 function toggleTheme() { setTheme(theme === 'dark' ? 'light' : 'dark'); }
 setTheme(theme);
-
 function save() { localStorage.setItem('fw', JSON.stringify(state)); }
 function pushHist(n) {
-  hist.push([Date.now(), n]);
-  if (hist.length > 60) hist = hist.slice(-60);
-  localStorage.setItem('fwHist', JSON.stringify(hist));
-  drawSpark();
+ hist.push([Date.now(), n]);
+ if (hist.length > 60) hist = hist.slice(-60);
+ localStorage.setItem('fwHist', JSON.stringify(hist));
+ drawSpark();
 }
 function drawSpark() {
-  if (hist.length < 2) { spark.textContent = ''; return; }
-  var bars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
-  var counts = hist.map(function(h) { return h[1]; });
-  var mn = Math.min.apply(null, counts), mx = Math.max.apply(null, counts);
-  spark.textContent = counts.slice(-18).map(function(v) {
-    return mn === mx ? bars[0] : bars[Math.min(7, Math.floor((v - mn) / (mx - mn) * 7))];
-  }).join('');
+ if (hist.length < 2) { spark.textContent = ''; return; }
+ var bars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
+ var counts = hist.map(function(h) { return h[1]; });
+ var mn = Math.min.apply(null, counts), mx = Math.max.apply(null, counts);
+ spark.textContent = counts.slice(-18).map(function(v) {
+ return mn === mx ? bars[0] : bars[Math.min(7, Math.floor((v - mn) / (mx - mn) * 7))];
+ }).join('');
 }
-
 function buildSettings() {
-  var h = '';
-  h += '<label>area</label> <select id="area">';
-  presets.forEach(function(a) {
-    h += '<option value="' + a + '"' + (a === state.area ? ' selected' : '') + '>' + a + '</option>';
-  });
-  h += '</select>';
-  h += '<label>r</label> <input id="radius" type="number" min="5" max="2000" value="' + state.radius + '" size="3">';
-  h += '<label>src</label> <select id="src">';
-  srcs.forEach(function(s) {
-    h += '<option value="' + s[0] + '"' + (s[0] === state.src ? ' selected' : '') + '>' + s[1] + '</option>';
-  });
-  h += '</select>';
-  h += '<button id="expert">expert: ' + (state.expert ? 'on' : 'off') + '</button>';
-  h += '<input id="zip" placeholder="postal code">';
-  h += '<input id="country" value="' + state.country + '">';
-  h += '<button id="locate">locate</button>';
-  h += '<label>lat</label> <input id="lat" type="number" step="any">';
-  h += '<label>lon</label> <input id="lon" type="number" step="any">';
-  h += '<button id="set">set</button>';
-  h += '<button id="gps">📍 gps</button>';
-  P.innerHTML = h;
-
-  document.getElementById('area').onchange = function() {
-    state.area = this.value;
-    delete state.lat; delete state.lon; delete state.custom;
-    delete state.gps; delete state.glat; delete state.glon;
-    save(); load();
-  };
-  document.getElementById('radius').onchange = function() {
-    var v = parseInt(this.value) || 60;
-    state.radius = Math.min(2000, Math.max(5, v));
-    this.value = state.radius;
-    save(); load();
-  };
-  document.getElementById('src').onchange = function() {
-    state.src = this.value;
-    save(); load();
-  };
-  document.getElementById('expert').onclick = function() {
-    state.expert = state.expert ? 0 : 1;
-    this.textContent = 'expert: ' + (state.expert ? 'on' : 'off');
-    this.classList.toggle('on', !!state.expert);
-    save(); load();
-  };
-  document.getElementById('locate').onclick = function() {
-    var z = document.getElementById('zip').value.trim();
-    var c = document.getElementById('country').value.trim() || 'Greece';
-    if (!z) return;
-    state.country = c;
-    var btn = this;
-    btn.textContent = '…';
-    fetch(API + '?v=zip&zip=' + encodeURIComponent(z) + '&country=' + encodeURIComponent(c))
-      .then(function(r) { return r.json(); }).then(function(d) {
-        btn.textContent = 'locate';
-        if (d.error) { S.innerHTML = '<span class="alert">⚠ ' + d.error + '</span>'; return; }
-        state.area = d.name; state.lat = d.lat; state.lon = d.lon; state.custom = 1;
-        delete state.gps; delete state.glat; delete state.glon;
-        save(); load();
-      });
-  };
-  document.getElementById('set').onclick = function() {
-    var la = parseFloat(document.getElementById('lat').value);
-    var lo = parseFloat(document.getElementById('lon').value);
-    if (isNaN(la) || isNaN(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) {
-      S.innerHTML = '<span class="alert">⚠ invalid coordinates</span>';
-      return;
-    }
-    state.area = 'custom'; state.lat = la; state.lon = lo; state.custom = 1;
-    delete state.gps; delete state.glat; delete state.glon;
-    save(); load();
-  };
-  document.getElementById('gps').onclick = gpsGo;
+ var h = '';
+ h += '<label>area</label><select id="area">';
+ presets.forEach(function(a) {
+ h += '<option value="' + a + '"' + (a === state.area ? ' selected' : '') + '>' + a + '</option>';
+ });
+ h += '</select>';
+ h += '<label>r</label><input id="radius" type="number" min="5" max="2000" value="' + state.radius + '" size="3">';
+ h += '<label>src</label><select id="src">';
+ srcs.forEach(function(s) {
+ h += '<option value="' + s[0] + '"' + (s[0] === state.src ? ' selected' : '') + '>' + s[1] + '</option>';
+ });
+ h += '</select>';
+ h += '<button id="expert">expert: ' + (state.expert ? 'on' : 'off') + '</button>';
+ h += '<input id="zip" placeholder="postal code">';
+ h += '<input id="country" value="' + state.country + '">';
+ h += '<button id="locate">locate</button>';
+ h += '<label>lat</label><input id="lat" type="number" step="any">';
+ h += '<label>lon</label><input id="lon" type="number" step="any">';
+ h += '<button id="set">set</button>';
+ h += '<button id="gps">📍 gps</button>';
+ P.innerHTML = h;
+ document.getElementById('area').onchange = function() {
+ state.area = this.value;
+ delete state.lat; delete state.lon; delete state.custom;
+ delete state.gps; delete state.glat; delete state.glon;
+ save(); load();
+ };
+ document.getElementById('radius').onchange = function() {
+ var v = parseInt(this.value) || 60;
+ state.radius = Math.min(2000, Math.max(5, v));
+ this.value = state.radius;
+ save(); load();
+ };
+ document.getElementById('src').onchange = function() {
+ state.src = this.value;
+ save(); load();
+ };
+ document.getElementById('expert').onclick = function() {
+ state.expert = state.expert ? 0 : 1;
+ this.textContent = 'expert: ' + (state.expert ? 'on' : 'off');
+ this.classList.toggle('on', !!state.expert);
+ save(); load();
+ };
+ document.getElementById('locate').onclick = function() {
+ var z = document.getElementById('zip').value.trim();
+ var c = document.getElementById('country').value.trim() || 'Greece';
+ if (!z) return;
+ state.country = c;
+ var btn = this;
+ btn.textContent = '…';
+ fetch(API + '?v=zip&zip=' + encodeURIComponent(z) + '&country=' + encodeURIComponent(c))
+ .then(function(r) { return r.json(); }).then(function(d) {
+ btn.textContent = 'locate';
+ if (d.error) { S.innerHTML = '<span class="alert">⚠ ' + d.error + '</span>'; return; }
+ state.area = d.name; state.lat = d.lat; state.lon = d.lon; state.custom = 1;
+ delete state.gps; delete state.glat; delete state.glon;
+ save(); load();
+ });
+ };
+ document.getElementById('set').onclick = function() {
+ var la = parseFloat(document.getElementById('lat').value);
+ var lo = parseFloat(document.getElementById('lon').value);
+ if (isNaN(la) || isNaN(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) {
+ S.innerHTML = '<span class="alert">⚠ invalid coordinates</span>';
+ return;
+ }
+ state.area = 'custom'; state.lat = la; state.lon = lo; state.custom = 1;
+ delete state.gps; delete state.glat; delete state.glon;
+ save(); load();
+ };
+ document.getElementById('gps').onclick = gpsGo;
 }
-
 function gpsGo() {
-  if (!navigator.geolocation) {
-    S.innerHTML = '<span class="alert">⚠ gps unavailable</span>';
-    return;
-  }
-  var btns = document.querySelectorAll('#gps, .gpsbtn');
-  var busy = function(on) {
-    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('busy', on);
-  };
-  busy(true);
-  navigator.geolocation.getCurrentPosition(function(pos) {
-    state.gps = 1;
-    state.glat = pos.coords.latitude;
-    state.glon = pos.coords.longitude;
-    delete state.lat; delete state.lon; delete state.custom;
-    save(); syncControls(); busy(false);
-    // center radar + map on the fix immediately, refine fires in background
-    if (lastData) renderData({ area: 'gps', lat: state.glat, lon: state.glon,
-                               radius: state.radius, src: state.src, fires: lastFires,
-                               updated: lastData.updated });
-    load();
-  }, function() {
-    busy(false);
-    delete state.gps; delete state.glat; delete state.glon;
-    save(); syncControls();
-    S.innerHTML = '<span class="alert">⚠ location denied</span>';
-  });
+ if (!navigator.geolocation) {
+ S.innerHTML = '<span class="alert">⚠ gps unavailable</span>';
+ return;
+ }
+ var btns = document.querySelectorAll('#gps, .gpsbtn');
+ var busy = function(on) {
+ for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('busy', on);
+ };
+ busy(true);
+ navigator.geolocation.getCurrentPosition(function(pos) {
+ state.gps = 1;
+ state.glat = pos.coords.latitude;
+ state.glon = pos.coords.longitude;
+ delete state.lat; delete state.lon; delete state.custom;
+ save(); syncControls(); busy(false);
+ if (lastData) renderData({ area: 'gps', lat: state.glat, lon: state.glon,
+ radius: state.radius, src: state.src, fires: lastFires,
+ updated: lastData.updated });
+ load();
+ }, function() {
+ busy(false);
+ delete state.gps; delete state.glat; delete state.glon;
+ save(); syncControls();
+ S.innerHTML = '<span class="alert">⚠ location denied</span>';
+ });
 }
-
 var zoomFlash = 0;
 function zoomIn() {
-  state.radius = Math.max(5, Math.round(state.radius / 1.4));
-  zoomFlash = performance.now();
-  save(); syncControls();
-  if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
-                             radius: state.radius, src: state.src, fires: lastFires,
-                             updated: lastData.updated });
-  load();
+ state.radius = Math.max(5, Math.round(state.radius / 1.4));
+ zoomFlash = performance.now();
+ save(); syncControls();
+ if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
+ radius: state.radius, src: state.src, fires: lastFires,
+ updated: lastData.updated });
+ load();
 }
 function zoomOut() {
-  state.radius = Math.min(2000, Math.round(state.radius * 1.4));
-  zoomFlash = performance.now();
-  save(); syncControls();
-  if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
-                             radius: state.radius, src: state.src, fires: lastFires,
-                             updated: lastData.updated });
-  load();
+ state.radius = Math.min(2000, Math.round(state.radius * 1.4));
+ zoomFlash = performance.now();
+ save(); syncControls();
+ if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
+ radius: state.radius, src: state.src, fires: lastFires,
+ updated: lastData.updated });
+ load();
 }
 function cycleArea() {
-  var idx = presets.indexOf(state.area);
-  state.area = presets[(idx + 1) % presets.length];
-  delete state.lat; delete state.lon; delete state.custom;
-  delete state.gps; delete state.glat; delete state.glon;
-  save(); syncControls();
-  var c = PCOORDS[state.area];
-  renderData({ area: state.area, lat: c[0], lon: c[1], radius: state.radius,
-               src: state.src, fires: [], updated: '' });
-  load();
+ var idx = presets.indexOf(state.area);
+ state.area = presets[(idx + 1) % presets.length];
+ delete state.lat; delete state.lon; delete state.custom;
+ delete state.gps; delete state.glat; delete state.glon;
+ save(); syncControls();
+ var c = PCOORDS[state.area];
+ renderData({ area: state.area, lat: c[0], lon: c[1], radius: state.radius,
+ src: state.src, fires: [], updated: '' });
+ load();
 }
 function cycleSrc() {
-  var keys = srcs.map(function(s) { return s[0]; });
-  state.src = keys[(keys.indexOf(state.src) + 1) % keys.length];
-  save(); syncControls();
-  if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
-                             radius: lastData.radius, src: state.src, fires: lastFires,
-                             updated: lastData.updated });
-  load();
+ var keys = srcs.map(function(s) { return s[0]; });
+ state.src = keys[(keys.indexOf(state.src) + 1) % keys.length];
+ save(); syncControls();
+ if (lastData) renderData({ area: lastData.area, lat: lastData.lat, lon: lastData.lon,
+ radius: lastData.radius, src: state.src, fires: lastFires,
+ updated: lastData.updated });
+ load();
 }
 function toggleExpert() {
-  state.expert = state.expert ? 0 : 1;
-  save(); syncControls();
-  if (lastData) renderTable();
+ state.expert = state.expert ? 0 : 1;
+ save(); syncControls();
+ if (lastData) renderTable();
 }
-
 function syncControls() {
-  var a = document.getElementById('area'), s = document.getElementById('src'),
-      r = document.getElementById('radius'), e = document.getElementById('expert');
-  if (a) a.value = state.area;
-  if (s) s.value = state.src;
-  if (r) r.value = state.radius;
-  if (e) { e.textContent = 'expert: ' + (state.expert ? 'on' : 'off'); e.classList.toggle('on', !!state.expert); }
+ var a = document.getElementById('area'), s = document.getElementById('src'),
+ r = document.getElementById('radius'), e = document.getElementById('expert');
+ if (a) a.value = state.area;
+ if (s) s.value = state.src;
+ if (r) r.value = state.radius;
+ if (e) { e.textContent = 'expert: ' + (state.expert ? 'on' : 'off'); e.classList.toggle('on', !!state.expert); }
 }
-
 function mkBtn(pid, glyph, label, fn, cls) {
-  var b = document.createElement('button');
-  b.className = cls || '';
-  b.innerHTML = '<span class="g">' + glyph + '</span><span class="lb">' + label + '</span>';
-  b.onclick = fn;
-  document.getElementById(pid).appendChild(b);
+ var b = document.createElement('button');
+ b.className = cls || '';
+ b.innerHTML = '<span class="g">' + glyph + '</span><span class="lb">' + label + '</span>';
+ b.onclick = fn;
+ document.getElementById(pid).appendChild(b);
 }
-
 function buildToolbar() {
-  mkBtn('rbtn', '+', 'in', zoomIn);
-  mkBtn('rbtn', '−', 'out', zoomOut);
-  mkBtn('rbtn', '📍', 'gps', gpsGo, 'gpsbtn');
-  mkBtn('lbtn', '⟳', 'refresh', load);
-  mkBtn('lbtn', 'c', 'area', cycleArea);
-  mkBtn('lbtn', 's', 'src', cycleSrc);
-  mkBtn('lbtn', 'd', 'detail', toggleExpert);
-  syncControls();
+ mkBtn('rbtn', '+', 'in', zoomIn);
+ mkBtn('rbtn', '−', 'out', zoomOut);
+ mkBtn('rbtn', '📍', 'gps', gpsGo, 'gpsbtn');
+ mkBtn('lbtn', '⟳', 'refresh', load);
+ mkBtn('lbtn', 'c', 'area', cycleArea);
+ mkBtn('lbtn', 's', 'src', cycleSrc);
+ mkBtn('lbtn', 'd', 'detail', toggleExpert);
+ syncControls();
 }
-
 T.onclick = function(e) {
-  e.preventDefault();
-  P.classList.toggle('show');
-  T.textContent = P.classList.contains('show') ? '✖' : '⚙';
+ e.preventDefault();
+ P.classList.toggle('show');
+ T.textContent = P.classList.contains('show') ? '✖' : '⚙';
 };
 document.getElementById('themebtn').onclick = function(e) {
-  e.preventDefault(); toggleTheme();
+ e.preventDefault(); toggleTheme();
 };
-
 function compass(deg) {
-  return ['N','NE','E','SE','S','SW','W','NW'][Math.floor((deg + 22.5) / 45) % 8];
+ return ['N','NE','E','SE','S','SW','W','NW'][Math.floor((deg + 22.5) / 45) % 8];
 }
 function dirLabel(bearing) {
-  return ['north','northeast','east','southeast','south','southwest','west','northwest'][Math.floor((bearing + 22.5) / 45) % 8];
+ return ['north','northeast','east','southeast','south','southwest','west','northwest'][Math.floor((bearing + 22.5) / 45) % 8];
 }
 function ageAgo(date, time) {
-  try {
-    var m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    var t = time.match(/^(\d{2})(\d{2})$/);
-    if (!m || !t) return '?';
-    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +t[1], +t[2]));
-    var min = Math.floor((Date.now() - d.getTime()) / 60000);
-    if (min < 0) return '?';
-    if (min < 60) return min + 'm';
-    if (min < 1440) return Math.floor(min / 60) + 'h';
-    return Math.floor(min / 1440) + 'd';
-  } catch(_) { return '?'; }
+ try {
+ var m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ var t = time.match(/^(\d{2})(\d{2})$/);
+ if (!m || !t) return '?';
+ var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +t[1], +t[2]));
+ var min = Math.floor((Date.now() - d.getTime()) / 60000);
+ if (min < 0) return '?';
+ if (min < 60) return min + 'm';
+ if (min < 1440) return Math.floor(min / 60) + 'h';
+ return Math.floor(min / 1440) + 'd';
+ } catch(_) { return '?'; }
 }
 function localTime(date, time) {
-  try {
-    var m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    var t = time.match(/^(\d{2})(\d{2})$/);
-    if (!m || !t) return time;
-    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +t[1], +t[2]));
-    return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-  } catch(_) { return time; }
+ try {
+ var m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ var t = time.match(/^(\d{2})(\d{2})$/);
+ if (!m || !t) return time;
+ var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +t[1], +t[2]));
+ return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+ } catch(_) { return time; }
 }
 function sizeLabel(f) {
-  if (f.frp >= 10) return ['LARGE', '#f44'];
-  if (f.frp >= 2 || f.bright >= 330) return ['medium', '#ea0'];
-  return ['small', ''];
+ if (f.frp >= 10) return ['LARGE', '#f44'];
+ if (f.frp >= 2 || f.bright >= 330) return ['medium', '#ea0'];
+ return ['small', ''];
 }
-
 function riskLine(d) {
-  if (!d.fires || !d.fires.length) return '<span class="pill clear">● calm — no active fires</span>';
-  var f = d.fires[0];
-  var big = f.frp >= 10;
-  var cls, word;
-  if (f.dist < 5 || (f.dist < 10 && big)) { cls = 'alert'; word = '🔥 DANGER'; }
-  else if (f.dist < 10) { cls = 'warn'; word = '⚠ close'; }
-  else if (f.dist < 30) { cls = 'watch'; word = '● watch'; }
-  else { cls = 'clear'; word = '● calm'; }
-  return '<span class="pill ' + cls + '">risk: ' + word + '</span> ' +
-         'nearest ' + f.dist.toFixed(1) + ' km ' + dirLabel(f.bearing) + ' · ' +
-         ageAgo(f.acq_date, f.acq_time) + ' ago';
+ if (!d.fires || !d.fires.length) return '<span class="pill clear">● calm — no active fires</span>';
+ var f = d.fires[0];
+ var big = f.frp >= 10;
+ var cls, word;
+ if (f.dist < 5 || (f.dist < 10 && big)) { cls = 'alert'; word = '🔥 DANGER'; }
+ else if (f.dist < 10) { cls = 'warn'; word = '⚠ close'; }
+ else if (f.dist < 30) { cls = 'watch'; word = '● watch'; }
+ else { cls = 'clear'; word = '● calm'; }
+ return '<span class="pill ' + cls + '">risk: ' + word + '</span> ' +
+ 'nearest ' + f.dist.toFixed(1) + ' km ' + dirLabel(f.bearing) + ' · ' +
+ ageAgo(f.acq_date, f.acq_time) + ' ago';
 }
-
 var tileCache = {};
 var tileCanvas = document.createElement('canvas');
 var tctx = tileCanvas.getContext('2d');
 var tileKey = '', tileDirty = true, tileOx = 0, tileOy = 0, tileZ = 0;
-
 function buildTiles(size, r, dpr) {
-  if (!lastData) return;
-  var count = 0, k;
-  for (k in tileCache) count++;
-  if (count > 80) { tileCache = {}; tileKey = ''; }
-  var radius = lastData.radius, lat = lastData.lat, lon = lastData.lon;
-  // floor so the map always covers at least the scan radius
-  var z = Math.floor(Math.log2(156543.03 * Math.cos(lat * Math.PI / 180) * r / (radius * 1000)));
-  z = Math.max(3, Math.min(16, z));
-  tileZ = z;
-  var key = z + '|' + lat.toFixed(4) + '|' + lon.toFixed(4) + '|' + size;
-  if (key === tileKey && !tileDirty) return;
-  if (key !== tileKey) {
-    tileKey = key;
-    var n = 1 << z;
-    var xf = (lon + 180) / 360 * n;
-    var latr = lat * Math.PI / 180;
-    var yf = (1 - Math.log(Math.tan(latr) + 1 / Math.cos(latr)) / Math.PI) / 2 * n;
-    var half = (r + 10) / 256;
-    var x0 = Math.floor(xf - half), x1 = Math.ceil(xf + half);
-    var y0 = Math.floor(yf - half), y1 = Math.ceil(yf + half);
-    var tw = (x1 - x0 + 1) * 256, th = (y1 - y0 + 1) * 256;
-    tileOx = (xf - x0) * 256 * dpr;
-    tileOy = (yf - y0) * 256 * dpr;
-    tileCanvas.width = tw * dpr;
-    tileCanvas.height = th * dpr;
-    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    tctx.fillStyle = theme === 'light' ? '#f0f2f4' : '#101114';
-    tctx.fillRect(0, 0, tw, th);
-    for (var x = x0; x <= x1; x++) {
-      for (var y = y0; y <= y1; y++) {
-        if (y < 0 || y >= n) continue;
-        var tx = (x % n + n) % n;
-        (function(zz, tx2, yy, dx, dy) {
-          var k2 = zz + '/' + tx2 + '/' + yy;
-          var img = tileCache[k2];
-          if (img) {
-            if (img.complete) tctx.drawImage(img, dx, dy, 256, 256);
-          } else {
-            img = new Image();
-            img._fb = false;
-            img.onload = function() { tileDirty = true; };
-            img.onerror = function() {
-              if (!this._fb) { this._fb = true; this.src = TILE_FB.replace('{z}', zz).replace('{x}', tx2).replace('{y}', yy); }
-              else { tileDirty = true; }
-            };
-            img.src = TILE.replace('{z}', zz).replace('{x}', tx2).replace('{y}', yy);
-            tileCache[k2] = img;
-          }
-        })(z, tx, y, (x - x0) * 256, (y - y0) * 256);
-      }
-    }
-  }
-  tileDirty = false;
+ if (!lastData) return;
+ var count = 0, k;
+ for (k in tileCache) count++;
+ if (count > 80) { tileCache = {}; tileKey = ''; }
+ var radius = lastData.radius, lat = lastData.lat, lon = lastData.lon;
+ var z = Math.floor(Math.log2(156543.03 * Math.cos(lat * Math.PI / 180) * r / (radius * 1000)));
+ z = Math.max(3, Math.min(16, z));
+ tileZ = z;
+ var key = z + '|' + lat.toFixed(4) + '|' + lon.toFixed(4) + '|' + size;
+ if (key === tileKey && !tileDirty) return;
+ if (key !== tileKey) {
+ tileKey = key;
+ var n = 1 << z;
+ var xf = (lon + 180) / 360 * n;
+ var latr = lat * Math.PI / 180;
+ var yf = (1 - Math.log(Math.tan(latr) + 1 / Math.cos(latr)) / Math.PI) / 2 * n;
+ var half = (r + 10) / 256;
+ var x0 = Math.floor(xf - half), x1 = Math.ceil(xf + half);
+ var y0 = Math.floor(yf - half), y1 = Math.ceil(yf + half);
+ var tw = (x1 - x0 + 1) * 256, th = (y1 - y0 + 1) * 256;
+ tileOx = (xf - x0) * 256 * dpr;
+ tileOy = (yf - y0) * 256 * dpr;
+ tileCanvas.width = tw * dpr;
+ tileCanvas.height = th * dpr;
+ tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ tctx.fillStyle = theme === 'light' ? '#f0f2f4' : '#101114';
+ tctx.fillRect(0, 0, tw, th);
+ for (var x = x0; x <= x1; x++) {
+ for (var y = y0; y <= y1; y++) {
+ if (y < 0 || y >= n) continue;
+ var tx = (x % n + n) % n;
+ (function(zz, tx2, yy, dx, dy) {
+ var k2 = zz + '/' + tx2 + '/' + yy;
+ var img = tileCache[k2];
+ if (img) {
+ if (img.complete) tctx.drawImage(img, dx, dy, 256, 256);
+ } else {
+ img = new Image();
+ img._fb = false;
+ img.onload = function() { tileDirty = true; };
+ img.onerror = function() {
+ if (!this._fb) { this._fb = true; this.src = TILE_FB.replace('{z}', zz).replace('{x}', tx2).replace('{y}', yy); }
+ else { tileDirty = true; }
+ };
+ img.src = TILE.replace('{z}', zz).replace('{x}', tx2).replace('{y}', yy);
+ tileCache[k2] = img;
+ }
+ })(z, tx, y, (x - x0) * 256, (y - y0) * 256);
+ }
+ }
+ }
+ tileDirty = false;
 }
-
 function drawRadar(t) {
-  var now = t || performance.now();
-  var side = document.getElementById('lbtn').offsetWidth || 52;
-  var availW = Math.min(window.innerWidth - side * 2 - 28, 520);
-  var availH = Math.max(140, window.innerHeight * 0.38);
-  var size = Math.round(Math.min(availW, availH));
-  var dpr = window.devicePixelRatio || 1;
-  radar.width = size * dpr;
-  radar.height = size * dpr;
-  radar.style.width = size + 'px';
-  radar.style.height = size + 'px';
-  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  rctx.clearRect(0, 0, size, size);
-
-  var cx = size / 2, cy = size / 2;
-  var r = size / 2 - 16;
-
-  var isLight = theme === 'light';
-  rctx.fillStyle = isLight ? '#f2f4f6' : '#0b0d0e';
-  rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.fill();
-
-  if (tileCanvas.width) {
-    buildTiles(size, r, dpr);
-    rctx.save();
-    rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.clip();
-    rctx.setTransform(1, 0, 0, 1, 0, 0);
-    rctx.drawImage(tileCanvas, cx * dpr - tileOx, cy * dpr - tileOy);
-    rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    rctx.restore();
-  }
-
-  var ringAlpha = isLight ? 0.22 : 0.35;
-  var tickAlpha = isLight ? 0.18 : 0.4;
-  rctx.strokeStyle = 'rgba(46,224,110,' + ringAlpha + ')';
-  rctx.lineWidth = 1;
-  for (var i = 1; i <= 3; i++) {
-    rctx.setLineDash(i === 3 ? [] : [3, 6]);
-    rctx.beginPath(); rctx.arc(cx, cy, r * i / 3, 0, Math.PI * 2); rctx.stroke();
-    rctx.setLineDash([]);
-  }
-  rctx.beginPath();
-  rctx.moveTo(cx - r, cy); rctx.lineTo(cx + r, cy);
-  rctx.moveTo(cx, cy - r); rctx.lineTo(cx, cy + r);
-  rctx.stroke();
-
-  rctx.fillStyle = theme === 'light' ? '#555' : 'rgba(46,224,110,0.7)';
-  rctx.font = '11px monospace';
-  rctx.textAlign = 'center';
-  rctx.fillText('N', cx, 11);
-  rctx.fillText('E', size - 7, cy + 4);
-  rctx.fillText('S', cx, size - 4);
-  rctx.fillText('W', 8, cy + 4);
-
-  for (var k = 0; k < 8; k++) {
-    var a = k * Math.PI / 4;
-    var x1 = cx + (r - 4) * Math.sin(a), y1 = cy - (r - 4) * Math.cos(a);
-    var x2 = cx + r * Math.sin(a), y2 = cy - r * Math.cos(a);
-    rctx.strokeStyle = 'rgba(46,224,110,' + tickAlpha + ')';
-    rctx.beginPath(); rctx.moveTo(x1, y1); rctx.lineTo(x2, y2); rctx.stroke();
-  }
-
-  if (!reducedMotion && rctx.createConicGradient) {
-    var ang = (now / 2600) * Math.PI * 2;
-    var grad = rctx.createConicGradient(ang, cx, cy);
-    var sweepAlpha = isLight ? 0.15 : 0.28;
-    grad.addColorStop(0, 'rgba(46,224,110,' + sweepAlpha + ')');
-    grad.addColorStop(0.14, 'rgba(46,224,110,0.02)');
-    grad.addColorStop(1, 'rgba(46,224,110,0.02)');
-    rctx.fillStyle = grad;
-    rctx.beginPath(); rctx.moveTo(cx, cy); rctx.arc(cx, cy, r, ang - 0.9, ang); rctx.closePath(); rctx.fill();
-    rctx.strokeStyle = isLight ? 'rgba(30,140,80,0.4)' : 'rgba(46,224,110,0.5)';
-    rctx.lineWidth = 1.2;
-    rctx.beginPath(); rctx.moveTo(cx, cy); rctx.lineTo(cx + (r - 2) * Math.sin(ang), cy - (r - 2) * Math.cos(ang)); rctx.stroke();
-  }
-
-  // scan origin marker (GPS fix / preset / custom coords)
-  rctx.fillStyle = isLight ? 'rgba(20,140,120,0.95)' : 'rgba(47,217,200,0.95)';
-  rctx.beginPath(); rctx.arc(cx, cy, 3, 0, Math.PI * 2); rctx.fill();
-
-  if (lastData) {
-    var n = tileZ ? Math.pow(2, tileZ) : 0;
-    var px0 = 0, py0 = 0;
-    if (n) {
-      var latr0 = lastData.lat * Math.PI / 180;
-      px0 = (lastData.lon + 180) / 360 * n;
-      py0 = (1 - Math.log(Math.tan(latr0) + 1 / Math.cos(latr0)) / Math.PI) / 2 * n;
-    }
-    lastFires.forEach(function(f, idx) {
-      var px, py;
-      if (n) {
-        var latrf = f.lat * Math.PI / 180;
-        var xf2 = (f.lon + 180) / 360 * n;
-        var yf2 = (1 - Math.log(Math.tan(latrf) + 1 / Math.cos(latrf)) / Math.PI) / 2 * n;
-        px = cx + (xf2 - px0) * 256;
-        py = cy + (yf2 - py0) * 256;
-      } else {
-        var cosLat = Math.cos(lastData.lat * Math.PI / 180);
-        var kmPerPx = lastData.radius / r;
-        px = cx + (f.lon - lastData.lon) * 111.32 * cosLat * kmPerPx;
-        py = cy + (lastData.lat - f.lat) * 111.32 * kmPerPx;
-      }
-      var dd = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-      if (dd > r - 3) { px = cx + (px - cx) * (r - 3) / dd; py = cy + (py - cy) * (r - 3) / dd; }
-      var col = f.frp >= 10 ? '#ff4141' : f.frp >= 5 ? '#ff7a3c' : f.frp >= 2 ? '#ffd23f' : '#8a6a3a';
-      var rad = Math.min(6, 2 + f.frp * 0.35);
-      rctx.shadowColor = col; rctx.shadowBlur = idx === 0 ? 10 : 5;
-      rctx.beginPath(); rctx.arc(px, py, rad, 0, Math.PI * 2);
-      rctx.fillStyle = col; rctx.fill();
-      rctx.shadowBlur = 0;
-      rctx.strokeStyle = 'rgba(255,255,255,0.45)';
-      rctx.lineWidth = 1; rctx.stroke();
-      if (idx === 0) {
-        var pulse = ((now % 1600) / 1600);
-        rctx.strokeStyle = 'rgba(255,65,65,' + (1 - pulse) * 0.7 + ')';
-        rctx.lineWidth = 1.4;
-        rctx.beginPath(); rctx.arc(px, py, 6 + pulse * 8, 0, Math.PI * 2); rctx.stroke();
-      }
-    });
-    rctx.fillStyle = '#55575e';
-    rctx.font = '11px monospace';
-    rctx.textAlign = 'left';
-    rctx.fillText('radius ' + lastData.radius + ' km', 5, size - 5);
-    var mapKm = n ? 156543.03 * Math.cos(lastData.lat * Math.PI / 180) / n * r / 1000 : lastData.radius;
-    for (var ri = 1; ri <= 2; ri++) {
-      rctx.fillText(Math.round(mapKm * ri / 3) + 'km', cx + r * ri / 3 + 4, cy + 4);
-    }
-    if (zoomFlash && now - zoomFlash < 600) {
-      var zf = 1 - (now - zoomFlash) / 600;
-      rctx.strokeStyle = 'rgba(255,122,60,' + zf + ')';
-      rctx.lineWidth = 3;
-      rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.stroke();
-    }
-  } else {
-    rctx.fillStyle = theme === 'light' ? '#aaa' : '#3a3c42';
-    rctx.font = '12px monospace';
-    rctx.textAlign = 'center';
-    rctx.fillText('awaiting data', cx, cy + 4);
-  }
-
-  var p = ((now % 2000) / 2000);
-  rctx.strokeStyle = isLight ? 'rgba(20,140,120,' + (0.3 + 0.3 * p) + ')' : 'rgba(47,217,200,' + (0.4 + 0.4 * p) + ')';
-  rctx.lineWidth = 1.6;
-  rctx.beginPath();
-  rctx.moveTo(cx - 7, cy); rctx.lineTo(cx + 7, cy);
-  rctx.moveTo(cx, cy - 7); rctx.lineTo(cx, cy + 7);
-  rctx.stroke();
-  rctx.beginPath(); rctx.arc(cx, cy, 2 + p * 3, 0, Math.PI * 2); rctx.stroke();
+ var now = t || performance.now();
+ var side = document.getElementById('lbtn').offsetWidth || 52;
+ var availW = Math.min(window.innerWidth - side * 2 - 28, 520);
+ var availH = Math.max(140, window.innerHeight * 0.38);
+ var size = Math.round(Math.min(availW, availH));
+ var dpr = window.devicePixelRatio || 1;
+ radar.width = size * dpr;
+ radar.height = size * dpr;
+ radar.style.width = size + 'px';
+ radar.style.height = size + 'px';
+ rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ rctx.clearRect(0, 0, size, size);
+ var cx = size / 2, cy = size / 2;
+ var r = size / 2 - 16;
+ var isLight = theme === 'light';
+ rctx.fillStyle = isLight ? '#f2f4f6' : '#0b0d0e';
+ rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.fill();
+ if (tileCanvas.width) {
+ buildTiles(size, r, dpr);
+ rctx.save();
+ rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.clip();
+ rctx.setTransform(1, 0, 0, 1, 0, 0);
+ rctx.drawImage(tileCanvas, cx * dpr - tileOx, cy * dpr - tileOy);
+ rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ rctx.restore();
+ }
+ var ringAlpha = isLight ? 0.22 : 0.35;
+ var tickAlpha = isLight ? 0.18 : 0.4;
+ rctx.strokeStyle = 'rgba(46,224,110,' + ringAlpha + ')';
+ rctx.lineWidth = 1;
+ for (var i = 1; i <= 3; i++) {
+ rctx.setLineDash(i === 3 ? [] : [3, 6]);
+ rctx.beginPath(); rctx.arc(cx, cy, r * i / 3, 0, Math.PI * 2); rctx.stroke();
+ rctx.setLineDash([]);
+ }
+ rctx.beginPath();
+ rctx.moveTo(cx - r, cy); rctx.lineTo(cx + r, cy);
+ rctx.moveTo(cx, cy - r); rctx.lineTo(cx, cy + r);
+ rctx.stroke();
+ rctx.fillStyle = theme === 'light' ? '#555' : 'rgba(46,224,110,0.7)';
+ rctx.font = '11px monospace';
+ rctx.textAlign = 'center';
+ rctx.fillText('N', cx, 11);
+ rctx.fillText('E', size - 7, cy + 4);
+ rctx.fillText('S', cx, size - 4);
+ rctx.fillText('W', 8, cy + 4);
+ for (var k = 0; k < 8; k++) {
+ var a = k * Math.PI / 4;
+ var x1 = cx + (r - 4) * Math.sin(a), y1 = cy - (r - 4) * Math.cos(a);
+ var x2 = cx + r * Math.sin(a), y2 = cy - r * Math.cos(a);
+ rctx.strokeStyle = 'rgba(46,224,110,' + tickAlpha + ')';
+ rctx.beginPath(); rctx.moveTo(x1, y1); rctx.lineTo(x2, y2); rctx.stroke();
+ }
+ if (!reducedMotion && rctx.createConicGradient) {
+ var ang = (now / 2600) * Math.PI * 2;
+ var grad = rctx.createConicGradient(ang, cx, cy);
+ var sweepAlpha = isLight ? 0.15 : 0.28;
+ grad.addColorStop(0, 'rgba(46,224,110,' + sweepAlpha + ')');
+ grad.addColorStop(0.14, 'rgba(46,224,110,0.02)');
+ grad.addColorStop(1, 'rgba(46,224,110,0.02)');
+ rctx.fillStyle = grad;
+ rctx.beginPath(); rctx.moveTo(cx, cy); rctx.arc(cx, cy, r, ang - 0.9, ang); rctx.closePath(); rctx.fill();
+ rctx.strokeStyle = isLight ? 'rgba(30,140,80,0.4)' : 'rgba(46,224,110,0.5)';
+ rctx.lineWidth = 1.2;
+ rctx.beginPath(); rctx.moveTo(cx, cy); rctx.lineTo(cx + (r - 2) * Math.sin(ang), cy - (r - 2) * Math.cos(ang)); rctx.stroke();
+ }
+ rctx.fillStyle = isLight ? 'rgba(20,140,120,0.95)' : 'rgba(47,217,200,0.95)';
+ rctx.beginPath(); rctx.arc(cx, cy, 3, 0, Math.PI * 2); rctx.fill();
+ if (lastData) {
+ var n = tileZ ? Math.pow(2, tileZ) : 0;
+ var px0 = 0, py0 = 0;
+ if (n) {
+ var latr0 = lastData.lat * Math.PI / 180;
+ px0 = (lastData.lon + 180) / 360 * n;
+ py0 = (1 - Math.log(Math.tan(latr0) + 1 / Math.cos(latr0)) / Math.PI) / 2 * n;
+ }
+ lastFires.forEach(function(f, idx) {
+ var px, py;
+ if (n) {
+ var latrf = f.lat * Math.PI / 180;
+ var xf2 = (f.lon + 180) / 360 * n;
+ var yf2 = (1 - Math.log(Math.tan(latrf) + 1 / Math.cos(latrf)) / Math.PI) / 2 * n;
+ px = cx + (xf2 - px0) * 256;
+ py = cy + (yf2 - py0) * 256;
+ } else {
+ var cosLat = Math.cos(lastData.lat * Math.PI / 180);
+ var kmPerPx = lastData.radius / r;
+ px = cx + (f.lon - lastData.lon) * 111.32 * cosLat * kmPerPx;
+ py = cy + (lastData.lat - f.lat) * 111.32 * kmPerPx;
+ }
+ var dd = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+ if (dd > r - 3) { px = cx + (px - cx) * (r - 3) / dd; py = cy + (py - cy) * (r - 3) / dd; }
+ var col = f.frp >= 10 ? '#ff4141' : f.frp >= 5 ? '#ff7a3c' : f.frp >= 2 ? '#ffd23f' : '#8a6a3a';
+ var rad = Math.min(6, 2 + f.frp * 0.35);
+ rctx.shadowColor = col; rctx.shadowBlur = idx === 0 ? 10 : 5;
+ rctx.beginPath(); rctx.arc(px, py, rad, 0, Math.PI * 2);
+ rctx.fillStyle = col; rctx.fill();
+ rctx.shadowBlur = 0;
+ rctx.strokeStyle = 'rgba(255,255,255,0.45)';
+ rctx.lineWidth = 1; rctx.stroke();
+ if (idx === 0) {
+ var pulse = ((now % 1600) / 1600);
+ rctx.strokeStyle = 'rgba(255,65,65,' + (1 - pulse) * 0.7 + ')';
+ rctx.lineWidth = 1.4;
+ rctx.beginPath(); rctx.arc(px, py, 6 + pulse * 8, 0, Math.PI * 2); rctx.stroke();
+ }
+ });
+ rctx.fillStyle = '#55575e';
+ rctx.font = '11px monospace';
+ rctx.textAlign = 'left';
+ rctx.fillText('radius ' + lastData.radius + ' km', 5, size - 5);
+ var mapKm = n ? 156543.03 * Math.cos(lastData.lat * Math.PI / 180) / n * r / 1000 : lastData.radius;
+ for (var ri = 1; ri <= 2; ri++) {
+ rctx.fillText(Math.round(mapKm * ri / 3) + 'km', cx + r * ri / 3 + 4, cy + 4);
+ }
+ if (zoomFlash && now - zoomFlash < 600) {
+ var zf = 1 - (now - zoomFlash) / 600;
+ rctx.strokeStyle = 'rgba(255,122,60,' + zf + ')';
+ rctx.lineWidth = 3;
+ rctx.beginPath(); rctx.arc(cx, cy, r, 0, Math.PI * 2); rctx.stroke();
+ }
+ } else {
+ rctx.fillStyle = theme === 'light' ? '#aaa' : '#3a3c42';
+ rctx.font = '12px monospace';
+ rctx.textAlign = 'center';
+ rctx.fillText('awaiting data', cx, cy + 4);
+ }
+ var p = ((now % 2000) / 2000);
+ rctx.strokeStyle = isLight ? 'rgba(20,140,120,' + (0.3 + 0.3 * p) + ')' : 'rgba(47,217,200,' + (0.4 + 0.4 * p) + ')';
+ rctx.lineWidth = 1.6;
+ rctx.beginPath();
+ rctx.moveTo(cx - 7, cy); rctx.lineTo(cx + 7, cy);
+ rctx.moveTo(cx, cy - 7); rctx.lineTo(cx, cy + 7);
+ rctx.stroke();
+ rctx.beginPath(); rctx.arc(cx, cy, 2 + p * 3, 0, Math.PI * 2); rctx.stroke();
 }
-
 radar.onclick = function() { gpsGo(); };
 window.addEventListener('resize', drawRadar);
-
 function renderTable() {
-  var d = lastData;
-  if (!d.fires || d.fires.length === 0) { L.innerHTML = ''; return; }
-  var tbl = '<table><thead><tr>';
-  tbl += '<th></th><th class="col-time">time</th><th>near</th><th class="dist">dist</th><th>dir</th><th>intensity</th>';
-  if (state.expert) {
-    tbl += '<th class="col-bright">bright</th><th class="col-conf">conf</th><th class="col-sat">sat</th><th class="col-dn">d/n</th>';
-  }
-  tbl += '<th>age</th></tr></thead><tbody>';
-  d.fires.forEach(function(f, i) {
-    var cls = (f.dist < 5 || f.frp >= 10) ? ' fire alert' : (f.dist < 10 ? ' fire warn' : ' fire');
-    var sev = f.dist < 5 || f.frp >= 10 ? 'alert' : f.dist < 10 ? 'warn' : f.dist < 30 ? 'watch' : '';
-    var sz = sizeLabel(f);
-    var time = localTime(f.acq_date, f.acq_time);
-    var age = ageAgo(f.acq_date, f.acq_time);
-
-    tbl += '<tr class="' + cls + '" data-i="' + i + '">';
-    tbl += '<td class="dot"><span class="sev ' + sev + '"></span></td>';
-    tbl += '<td class="col-time">' + time + '</td>';
-    tbl += '<td class="near">' + (f.near || '') + '</td>';
-    tbl += '<td class="dist">' + f.dist.toFixed(1) + ' km</td>';
-    tbl += '<td>' + compass(f.bearing) + ' ' + f.bearing.toFixed(0) + '°</td>';
-    var c = sz[1] ? ' style="color:' + sz[1] + '"' : '';
-    tbl += '<td' + c + '>' + sz[0] + ' ' + f.frp.toFixed(1) + 'MW</td>';
-    if (state.expert) {
-      tbl += '<td class="col-bright">' + f.bright.toFixed(0) + 'K</td>';
-      tbl += '<td class="col-conf">' + f.conf + '</td>';
-      tbl += '<td class="col-sat">' + f.sat + '</td>';
-      tbl += '<td class="col-dn">' + (f.dn || '--') + '</td>';
-    }
-    tbl += '<td>' + age + '</td>';
-    tbl += '</tr>';
-  });
-  tbl += '</tbody></table>';
-  L.innerHTML = tbl;
+ var d = lastData;
+ if (!d.fires || d.fires.length === 0) { L.innerHTML = ''; return; }
+ var tbl = '<table><thead><tr>';
+ tbl += '<th></th><th class="col-time">time</th><th>near</th><th class="dist">dist</th><th>dir</th><th>intensity</th>';
+ if (state.expert) {
+ tbl += '<th class="col-bright">bright</th><th class="col-conf">conf</th><th class="col-sat">sat</th><th class="col-dn">d/n</th>';
+ }
+ tbl += '<th>age</th></tr></thead><tbody>';
+ d.fires.forEach(function(f, i) {
+ var cls = (f.dist < 5 || f.frp >= 10) ? ' fire alert' : (f.dist < 10 ? ' fire warn' : ' fire');
+ var sev = f.dist < 5 || f.frp >= 10 ? 'alert' : f.dist < 10 ? 'warn' : f.dist < 30 ? 'watch' : '';
+ var sz = sizeLabel(f);
+ var time = localTime(f.acq_date, f.acq_time);
+ var age = ageAgo(f.acq_date, f.acq_time);
+ tbl += '<tr class="' + cls + '" data-i="' + i + '">';
+ tbl += '<td class="dot"><span class="sev ' + sev + '"></span></td>';
+ tbl += '<td class="col-time">' + time + '</td>';
+ tbl += '<td class="near">' + (f.near || '') + '</td>';
+ tbl += '<td class="dist">' + f.dist.toFixed(1) + ' km</td>';
+ tbl += '<td>' + compass(f.bearing) + ' ' + f.bearing.toFixed(0) + '°</td>';
+ var c = sz[1] ? ' style="color:' + sz[1] + '"' : '';
+ tbl += '<td' + c + '>' + sz[0] + ' ' + f.frp.toFixed(1) + 'MW</td>';
+ if (state.expert) {
+ tbl += '<td class="col-bright">' + f.bright.toFixed(0) + 'K</td>';
+ tbl += '<td class="col-conf">' + f.conf + '</td>';
+ tbl += '<td class="col-sat">' + f.sat + '</td>';
+ tbl += '<td class="col-dn">' + (f.dn || '--') + '</td>';
+ }
+ tbl += '<td>' + age + '</td>';
+ tbl += '</tr>';
+ });
+ tbl += '</tbody></table>';
+ L.innerHTML = tbl;
 }
-
 function renderData(d, push) {
-  lastData = d;
-  lastFires = d.fires || [];
-  if (push) pushHist(lastFires.length);
-  C.innerHTML = '<span class="live"></span>updated ' + new Date().toLocaleTimeString();
-  drawRadar();
-
-  var area = d.area || state.area;
-  if (state.gps) area = 'gps (' + d.lat.toFixed(2) + ', ' + d.lon.toFixed(2) + ')';
-  radarlabel.textContent = 'scanned area — ' + d.radius + ' km around ' + area +
-    ' · src ' + state.src + (state.gps ? ' (tap radar to recenter)' : ' (tap radar for gps)');
-
-  var h = '';
-  if (d.error) {
-    h += '<span class="alert">⚠ ' + d.error + '</span>';
-    S.innerHTML = h;
-    R.innerHTML = '';
-    L.innerHTML = '';
-    return;
-  }
-  if (!d.fires || d.fires.length === 0) {
-    h += '<span class="clear">✅ all clear</span> — no fires within ';
-    h += '<b>' + d.radius + ' km</b> of <b>' + area + '</b>';
-  } else {
-    var closest = d.fires[0];
-    var age = ageAgo(closest.acq_date, closest.acq_time);
-    if (closest.dist < 5) h += '<span class="alert">⚠ DANGER</span> — ';
-    h += '<span class="alert">🔥 ' + d.fires.length + ' fire' + (d.fires.length > 1 ? 's' : '');
-    h += '</span> within <b>' + d.radius + ' km</b> of <b>' + area + '</b>';
-    h += ' · closest ' + closest.dist.toFixed(1) + ' km ' + dirLabel(closest.bearing);
-    h += ' · ' + age + ' ago';
-  }
-  S.innerHTML = h;
-  R.innerHTML = riskLine(d);
-  renderTable();
+ lastData = d;
+ lastFires = d.fires || [];
+ if (push) pushHist(lastFires.length);
+ C.innerHTML = '<span class="live"></span>updated ' + new Date().toLocaleTimeString();
+ drawRadar();
+ var area = d.area || state.area;
+ if (state.gps) area = 'gps (' + d.lat.toFixed(2) + ', ' + d.lon.toFixed(2) + ')';
+ radarlabel.textContent = 'scanned area — ' + d.radius + ' km around ' + area +
+ ' · src ' + state.src + (state.gps ? ' (tap radar to recenter)' : ' (tap radar for gps)');
+ var h = '';
+ if (d.error) {
+ h += '<span class="alert">⚠ ' + d.error + '</span>';
+ S.innerHTML = h;
+ R.innerHTML = '';
+ L.innerHTML = '';
+ return;
+ }
+ if (!d.fires || d.fires.length === 0) {
+ h += '<span class="clear">✅ all clear</span> — no fires within ';
+ h += '<b>' + d.radius + ' km</b> of <b>' + area + '</b>';
+ } else {
+ var closest = d.fires[0];
+ var age = ageAgo(closest.acq_date, closest.acq_time);
+ if (closest.dist < 5) h += '<span class="alert">⚠ DANGER</span> — ';
+ h += '<span class="alert">🔥 ' + d.fires.length + ' fire' + (d.fires.length > 1 ? 's' : '');
+ h += '</span> within <b>' + d.radius + ' km</b> of <b>' + area + '</b>';
+ h += ' · closest ' + closest.dist.toFixed(1) + ' km ' + dirLabel(closest.bearing);
+ h += ' · ' + age + ' ago';
+ }
+ S.innerHTML = h;
+ R.innerHTML = riskLine(d);
+ renderTable();
 }
-
 function load() {
-  var u = API + '?v=data&area=' + state.area + '&radius=' + state.radius + '&src=' + state.src;
-  if (state.gps) u += '&gps=1&lat=' + state.glat + '&lon=' + state.glon;
-  else if (state.lat) u += '&lat=' + state.lat + '&lon=' + state.lon;
-
-  fetch(u).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.radius && d.radius !== state.radius) { state.radius = d.radius; save(); syncControls(); }
-    renderData(d, true);
-  }).catch(function(err) {
-    S.innerHTML = '<span class="alert">⚠ fetch error: ' + err + '</span>';
-  });
+ var u = API + '?v=data&area=' + state.area + '&radius=' + state.radius + '&src=' + state.src;
+ if (state.gps) u += '&gps=1&lat=' + state.glat + '&lon=' + state.glon;
+ else if (state.lat) u += '&lat=' + state.lat + '&lon=' + state.lon;
+ fetch(u).then(function(r) { return r.json(); }).then(function(d) {
+ if (d.radius && d.radius !== state.radius) { state.radius = d.radius; save(); syncControls(); }
+ renderData(d, true);
+ }).catch(function(err) {
+ S.innerHTML = '<span class="alert">⚠ fetch error: ' + err + '</span>';
+ });
 }
-
 L.addEventListener('click', function(e) {
-  var row = e.target.closest ? e.target.closest('tr[data-i]') : null;
-  if (!row) return;
-  var f = lastFires[+row.dataset.i];
-  if (!f) return;
-  var next = row.nextElementSibling;
-  if (next && next.classList.contains('detail')) { next.remove(); return; }
-  var tr = document.createElement('tr');
-  tr.className = 'detail';
-  tr.innerHTML = '<td colspan="11">lat ' + f.lat.toFixed(4) + ' · lon ' + f.lon.toFixed(4) +
-    ' · bright ' + f.bright.toFixed(0) + 'K · frp ' + f.frp.toFixed(1) + 'MW · ' +
-    localTime(f.acq_date, f.acq_time) + ' · conf ' + f.conf + ' · ' + f.sat + ' · ' + (f.dn || '--') + '</td>';
-  row.after(tr);
+ var row = e.target.closest ? e.target.closest('tr[data-i]') : null;
+ if (!row) return;
+ var f = lastFires[+row.dataset.i];
+ if (!f) return;
+ var next = row.nextElementSibling;
+ if (next && next.classList.contains('detail')) { next.remove(); return; }
+ var tr = document.createElement('tr');
+ tr.className = 'detail';
+ tr.innerHTML = '<td colspan="11">lat ' + f.lat.toFixed(4) + ' · lon ' + f.lon.toFixed(4) +
+ ' · bright ' + f.bright.toFixed(0) + 'K · frp ' + f.frp.toFixed(1) + 'MW · ' +
+ localTime(f.acq_date, f.acq_time) + ' · conf ' + f.conf + ' · ' + f.sat + ' · ' + (f.dn || '--') + '</td>';
+ row.after(tr);
 });
-
 function tryGpsInit() {
-  if (!navigator.geolocation || state.gps || state.lat) return;
-  navigator.geolocation.getCurrentPosition(function(pos) {
-    state.gps = 1;
-    state.glat = pos.coords.latitude;
-    state.glon = pos.coords.longitude;
-    delete state.lat; delete state.lon; delete state.custom;
-    save(); syncControls();
-    if (lastData) renderData({ area: 'gps', lat: state.glat, lon: state.glon,
-                               radius: state.radius, src: state.src, fires: lastFires,
-                               updated: lastData.updated });
-    load();
-  }, function() { /* denied or unavailable: stay on preset */ });
+ if (!navigator.geolocation || state.gps || state.lat) return;
+ navigator.geolocation.getCurrentPosition(function(pos) {
+ state.gps = 1;
+ state.glat = pos.coords.latitude;
+ state.glon = pos.coords.longitude;
+ delete state.lat; delete state.lon; delete state.custom;
+ save(); syncControls();
+ if (lastData) renderData({ area: 'gps', lat: state.glat, lon: state.glon,
+ radius: state.radius, src: state.src, fires: lastFires,
+ updated: lastData.updated });
+ load();
+ }, function() { });
 }
-
 buildSettings();
 buildToolbar();
 drawRadar();
 load();
 tryGpsInit();
 setInterval(load, 5 * 60 * 1000);
-if (!reducedMotion) { (function loop() { drawRadar(); requestAnimationFrame(loop); })(); }
-</script>
-</body>
-</html>
+if (!reducedMotion) { (function loop() { drawRadar(); requestAnimationFrame(loop); })(); }</script></body></html>
