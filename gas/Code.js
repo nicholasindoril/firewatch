@@ -30,9 +30,10 @@ function doGet(e) {
   var p = e.parameter || {};
   if (p.v === 'data') return dataResponse(p);
   if (p.v === 'zip') return zipResponse(p);
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('firewatch')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  // Serve the app as a plain top-level HTML page (not the sandboxed iframe),
+  // so the viewport meta works and phones get a real full-screen mobile layout.
+  var html = HtmlService.createHtmlOutputFromFile('Index').getContent();
+  return ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML);
 }
 
 function json(obj) {
