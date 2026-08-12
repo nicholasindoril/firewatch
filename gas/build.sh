@@ -9,9 +9,11 @@ import re
 with open('Index.html') as f:
     html = f.read()
 
-# Extract and minify CSS from <style> block
+# Extract and minify CSS from the first <style> block
 css_match = re.search(r'<style>(.*?)</style>', html, re.DOTALL)
-js_match = re.search(r'<script>(.*?)</script>', html, re.DOTALL)
+# App JS is the LAST <script> block (the first one may be a head script)
+scripts = list(re.finditer(r'<script>(.*?)</script>', html, re.DOTALL))
+js_match = scripts[-1] if scripts else None
 css = css_match.group(1) if css_match else ''
 js = js_match.group(1) if js_match else ''
 
