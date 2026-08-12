@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<title>Firewatch Lite</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.4 system-ui,sans-serif;background:#0a0a0a;color:#ccc;overflow-x:hidden}
+header{padding:10px 12px 6px;border-bottom:1px solid #222}
+h1{font-size:18px;color:#e44}
+h1 span{color:#888;font-size:12px;font-weight:400}
+.status{padding:4px 12px;font-size:12px;color:#aaa}
+.status .warn{color:#e44}
+.row{display:flex;gap:8px;padding:4px 12px;align-items:center;flex-wrap:wrap}
+.row label{font-size:11px;color:#888;min-width:40px}
+.row input,.row select{background:#1a1a1a;border:1px solid #333;color:#ccc;padding:4px 8px;border-radius:4px;font-size:13px}
+.row input[type=range]{flex:1;max-width:200px;padding:0;accent-color:#e44}
+.btn{background:#e44;color:#fff;border:none;padding:6px 14px;border-radius:4px;font-size:12px;cursor:pointer}
+.btn.off{background:#333}
+canvas{display:block;width:100%;max-width:500px;margin:0 auto}
+#mapwrap{position:relative;width:100%;max-width:500px;margin:0 auto}
+#compass{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:28px;pointer-events:none;transition:transform .3s}
+ul{list-style:none;padding:0 12px;max-width:500px;margin:0 auto}
+li{display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #111;font-size:12px;align-items:center}
+li:nth-child(1) .dir,li:nth-child(2) .dir,li:nth-child(3) .dir{font-weight:700;color:#fff}
+.dir{min-width:40px;font-size:15px}
+.place{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#aaa}
+.dist{min-width:55px;text-align:right;color:#e84}
+.frp{min-width:50px;text-align:right}
+.age{min-width:35px;text-align:right;color:#888}
+.large{color:#f33;font-weight:700}
+.medium{color:#e84}
+.small{color:#aa8}
+.heading{font-size:11px;color:#888}
+footer{padding:8px 12px;font-size:10px;color:#444;text-align:center;border-top:1px solid #111}
+</style>
+</head>
+<body>
+<header><h1>Firewatch<span> Lite</span></h1></header>
+<div class=status id=status>…</div>
+<div class=row>
+  <label>Radius</label>
+  <input type=range id=radius min=5 max=500 value=80 step=5>
+  <span id=rval style=font-size:12px;color:#aaa>80 km</span>
+  <button class=btn id=gpsbtn onclick=toggleGPS()>GPS</button>
+  <button class=btn id=hbtn onclick=toggleHeading()>⊙</button>
+</div>
+<div id=mapwrap><canvas id=map width=400 height=400></canvas></div>
+<div class=heading id=headinginfo></div>
+<ul id=list></ul>
+<footer>NASA FIRMS · no data stored</footer>
+
+<script>
+const API="https://firms.modaps.eosdis.nasa.gov/api/area/csv/82b260ac3b61b77e4b4215e94bbe4a43/VIIRS_SNPP_NRT/{west},{south},{east},{north}/1";
+let fires=[],loc=null,heading=null,headingOffset=0,gpsActive=false,headingActive=false,watchId=null;
+
+const $=s=>document.querySelector(s);
+const status=(m,w)=>{$('#status').innerHTML=w?`<span class=warn>${m}</span>`:m};
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function bearing(lat1,lon1,lat2,lon2){
+  const dLon=(lon2-lon1)*Math.PI/180;
+  const y=Math.sin(dLon)*Math.cos(lat2*Math.PI/180);
+  const x=Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180)-Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLon);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+function compass(h){return["N","NE","E","SE","S","SW","W","NW"][Math.round(((h+360)%360)/45)%8];}
+function relDir(b,h){const r=((b-h+headingOffset)+360)%360;
+  if(r<22.5||r>=337.5)return'↑';
+  if(r<67.5)return'↗';if(r<112.5)return'→';if(r<157.5)return'↘';
+  if(r<202.5)return'↓';if(r<247.5)return'↙';if(r<292.5)return'←';return'↖';
+}
+function ageMins(date,time){
+  try{const t=new Date(date+'T'+time.slice(0,2)+':'+time.slice(2,4)+':00Z');
+    return Math.max(0,Math.round((Date.now()-t)/60000));}catch(e){return -1;}
+}
+function friendlyAge(m){
+  if(m<0)return'?';if(m<60)return m+'m';if(m<1440)return Math.floor(m/60)+'h';return Math.floor(m/1440)+'d';
+}
+
+async function fetchFires(){
+  if(!loc){status('enable GPS first',true);return;}
+  const r=parseInt($('#radius').value);
+  const dLat=r/111.32,dLon=r/(111.32*Math.cos(loc.lat*Math.PI/180));
+  const url=API.replace('{west}',(loc.lon-dLon).toFixed(4))
+    .replace('{south}',(loc.lat-dLat).toFixed(4))
+    .replace('{east}',(loc.lon+dLon).toFixed(4))
+    .replace('{north}',(loc.lat+dLat).toFixed(4));
+  try{
+    status('loading…');
+    const res=await fetch(url);
+    if(!res.ok)throw new Error(res.status);
+    const text=await res.text();
+    const lines=text.trim().split('\n');
+    if(lines.length<2){fires=[];status('all clear — no fires detected');render();return;}
+    const headers=lines[0].split(',');
+    fires=lines.slice(1).map(line=>{
+      const v=line.split(',');
+      const f={};
+      headers.forEach((h,i)=>f[h.trim()]=v[i]?v[i].trim():'');
+      f.lat=parseFloat(f.latitude);f.lon=parseFloat(f.longitude);
+      f.dist=haversine(loc.lat,loc.lon,f.lat,f.lon);
+      f.bear=bearing(loc.lat,loc.lon,f.lat,f.lon);
+      f.bright=parseFloat(f.bright_ti4||f.brightness||0);
+      f.frp=parseFloat(f.frp||0);
+      f.age=ageMins(f.acq_date,f.acq_time);
+      return f;
+    }).filter(f=>!isNaN(f.lat)&&f.dist<=r).sort((a,b)=>a.dist-b.dist);
+    status(fires.length+' fire'+(fires.length!==1?'s':'')+' detected within '+r+' km');
+  }catch(e){status('fetch error: '+e.message,true);fires=[];}
+  render();
+}
+
+function render(){
+  drawMap();
+  const list=$('#list');
+  list.innerHTML=fires.slice(0,15).map(f=>{
+    const age=friendlyAge(f.age);
+    const frpClass=f.frp>=10?'large':f.frp>=2?'medium':'small';
+    const dir=headingActive?relDir(f.bear,heading||0):compass(f.bear);
+    const dist=f.dist.toFixed(1)+' km';
+    return `<li><span class=dir>${dir}</span><span class=place>${f.lat.toFixed(2)},${f.lon.toFixed(2)}</span>
+      <span class=dist>${dist}</span><span class="frp ${frpClass}">${f.frp.toFixed(1)}MW</span><span class=age>${age}</span></li>`;
+  }).join('');
+  if(headingActive&&heading!==null){
+    $('#headinginfo').innerHTML=`📱 heading ${heading.toFixed(0)}° ${compass(heading)}${headingOffset?' offset '+headingOffset+'°':''}`;
+  }else{$('#headinginfo').innerHTML='';}
+}
+
+function drawMap(){
+  const canvas=$('#map'),ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if(!loc)return;
+  const r=parseInt($('#radius').value);
+  const cx=W/2,cy=H/2,scale=Math.min(W,H)/(2*r);
+  // ring
+  ctx.beginPath();ctx.arc(cx,cy,r*scale,0,Math.PI*2);
+  ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.stroke();
+  // fires
+  for(const f of fires){
+    const x=cx+(f.lon-loc.lon)*111.32*Math.cos(loc.lat*Math.PI/180)*scale;
+    const y=cy-(f.lat-loc.lat)*111.32*scale;
+    const frp=f.frp||0,rad=Math.max(3,Math.min(12,frp/2));
+    const alpha=frp>=10?1:frp>=2?0.8:0.5;
+    const grad=ctx.createRadialGradient(x,y,0,x,y,rad);
+    const c=frp>=10?'255,40,0':frp>=2?'255,140,0':'200,160,0';
+    grad.addColorStop(0,`rgba(${c},${alpha})`);
+    grad.addColorStop(0.6,`rgba(${c},${alpha*0.6})`);
+    grad.addColorStop(1,`rgba(${c},0)`);
+    ctx.beginPath();ctx.arc(x,y,rad,0,Math.PI*2);
+    ctx.fillStyle=grad;ctx.fill();
+  }
+  // center
+  ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);
+  ctx.fillStyle='#0ff';ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
+  // heading indicator
+  if(headingActive&&heading!==null){
+    const hRad=((heading+headingOffset)-90)*Math.PI/180;
+    const hx=cx+r*scale*Math.cos(hRad),hy=cy+r*scale*Math.sin(hRad);
+    ctx.beginPath();ctx.arc(hx,hy,4,0,Math.PI*2);
+    ctx.fillStyle='#ff0';ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=0.5;ctx.stroke();
+  }
+}
+
+function toggleGPS(){
+  if(gpsActive){stopGPS();return;}
+  gpsActive=true;$('#gpsbtn').textContent='…';$('#gpsbtn').classList.add('off');
+  status('acquiring GPS…');
+  if('geolocation' in navigator){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      loc={lat:pos.coords.latitude,lon:pos.coords.longitude,acc:pos.coords.accuracy};
+      status(`GPS: ${loc.lat.toFixed(3)},${loc.lon.toFixed(3)} ±${loc.acc.toFixed(0)}m`);
+      $('#gpsbtn').textContent='GPS ✓';$('#gpsbtn').classList.remove('off');
+      fetchFires();
+    },err=>{
+      gpsActive=false;
+      $('#gpsbtn').textContent='GPS';$('#gpsbtn').classList.remove('off');
+      if(err.code===1){
+        status('location permission denied — grant it in browser settings, or use manual coords',true);
+      }else if(err.code===3){
+        status('GPS timeout — try outdoors or use manual coords',true);
+      }else{
+        status('GPS error: '+err.message,true);
+      }
+    },{enableHighAccuracy:true,timeout:30000,maximumAge:600000});
+  }else{status('no geolocation API',true);stopGPS();}
+}
+
+function stopGPS(){
+  gpsActive=false;$('#gpsbtn').textContent='GPS';$('#gpsbtn').classList.remove('off');
+  if(watchId){navigator.geolocation.clearWatch(watchId);watchId=null;}
+}
+
+function toggleHeading(){
+  headingActive=!headingActive;
+  $('#hbtn').textContent=headingActive?'⊙✓':'⊙';
+  $('#hbtn').classList.toggle('off',!headingActive);
+  if(headingActive){
+    if('ondeviceorientationabsolute' in window){
+      window.addEventListener('deviceorientationabsolute',onOrient,true);
+    }else if('ondeviceorientation' in window){
+      window.addEventListener('deviceorientation',onOrient,true);
+    }else{status('no compass sensor',true);headingActive=false;return;}
+  }else{
+    window.removeEventListener('deviceorientationabsolute',onOrient,true);
+    window.removeEventListener('deviceorientation',onOrient,true);
+    heading=null;
+  }
+  render();
+}
+
+function onOrient(e){
+  if(e.webkitCompassHeading!=null)heading=e.webkitCompassHeading;
+  else if(e.alpha!=null)heading=360-e.alpha;
+  if(headingActive)render();
+}
+
+$('#radius').oninput=()=>{$('#rval').textContent=$('#radius').value+' km';fetchFires();};
+setInterval(()=>{if(loc)fetchFires();},300000);
+status('tap GPS to start');
+</script>
+</body>
+</html>
