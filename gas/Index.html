@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html data-theme="light">
+<html data-theme="light" style="color-scheme:light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -9,7 +9,6 @@
 <title>firewatch</title>
 <style>
 :root{
-  color-scheme:dark;
   --bg:#0d0d0f; --panel:#131316; --line:#26262b;
   --txt:#c8c8cd; --dim:#6a6a72;
   --red:#ff4141; --orange:#ff7a3c; --yellow:#ffd23f; --green:#2ee06e; --cyan:#2fd9c8;
@@ -22,11 +21,10 @@
   --thead-bg:rgba(13,13,15,.94);
 }
 [data-theme="light"]{
-  color-scheme:light;
   --bg:#ffffff; --panel:#ffffff; --line:#d4d4d8;
   --txt:#111118; --dim:#787880;
   --red:#cc1a1a; --orange:#d4551a; --yellow:#8a6d00; --green:#1a7040; --cyan:#1a6058;
-  --btn-bg:#f4f4f5; --btn-border:#d4d4d8; --btn-active:#e4e4e7;
+  --btn-bg:#e8e8ec; --btn-border:#c4c4cc; --btn-active:#dcdce0;
   --input-bg:#ffffff; --input-border:#d4d4d8;
   --list-bg:transparent; --list-border:#e4e4e7; --list-fire-bg:rgba(220,30,30,.05);
   --status-bg:linear-gradient(90deg,rgba(220,80,40,.04),transparent);
@@ -141,7 +139,7 @@ body{color:var(--txt);font:14px/1.45 monospace;display:flex;flex-direction:colum
 var API = 'https://script.google.com/macros/s/AKfycbwiA5CmmxSGT02wvNUjYQXeAeMhh70tUHv0EUV9eHiuJqnX0VuzaHiCjv8Y1nRXdbV7mw/exec';
 
 var S = document.getElementById('statustxt');
-var VER = 19;
+var VER = 20;
 document.getElementById('ver').textContent = 'v' + VER;
 var R = document.getElementById('risk');
 var P = document.getElementById('settings');
@@ -179,12 +177,13 @@ function setTheme(t) {
   theme = t;
   localStorage.setItem('fwTheme', t);
   document.documentElement.setAttribute('data-theme', t);
+  document.documentElement.style.colorScheme = t;
   document.getElementById('themecolor').setAttribute('content', t === 'light' ? '#ffffff' : '#0d0d0f');
   TILE = t === 'light' ? TILE_LIGHT : TILE_DARK;
   tileCache = {}; tileKey = ''; tileDirty = true;
   var btn = document.getElementById('themebtn');
   if (btn) btn.textContent = t === 'light' ? '☀' : '☾';
-  drawRadar();
+  if (lastData) drawRadar();
 }
 
 function toggleTheme() { setTheme(theme === 'dark' ? 'light' : 'dark'); }
