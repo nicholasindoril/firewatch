@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Build: minify CSS/JS and push to Google Apps Script via clasp
+# Build: minify CSS/JS inline and push to Google Apps Script via clasp
 set -e
 cd "$(dirname "$0")"
 
@@ -9,40 +9,34 @@ import re
 with open('Index.html') as f:
     html = f.read()
 
-# Extract CSS
+# Extract and minify CSS from <style> block
 css_match = re.search(r'<style>(.*?)</style>', html, re.DOTALL)
-if css_match:
-    css = css_match.group(1)
-    # Minify CSS
-    css_min = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
-    css_min = re.sub(r'\s+', ' ', css_min)
-    css_min = re.sub(r'\s*([{}:;,])\s*', r'\1', css_min)
-    css_min = css_min.strip()
-    with open('Styles.html', 'w') as f:
-        f.write(css_min)
-
-# Extract JS
 js_match = re.search(r'<script>(.*?)</script>', html, re.DOTALL)
-if js_match:
-    js = js_match.group(1)
-    # Minify JS (basic)
-    js_min = re.sub(r'//[^\n]*\n', '\n', js)
-    js_min = re.sub(r'/\*.*?\*/', '', js_min, flags=re.DOTALL)
-    js_min = re.sub(r'  +', ' ', js_min)
-    js_min = re.sub(r'\n\s*\n', '\n', js_min)
-    js_min = js_min.strip()
+css = css_match.group(1) if css_match else ''
+js = js_match.group(1) if js_match else ''
 
-# Build new Index.html with include and minified JS
-new_html = html[:css_match.start()] + '<?!= include(\"Styles\"); ?>' + html[css_match.end():js_match.start()] + '<script>' + js_min + '</script>' + html[js_match.end():]
+# Minify CSS
+css_min = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
+css_min = re.sub(r'\s+', ' ', css_min)
+css_min = re.sub(r'\s*([{}:;,])\s*', r'\1', css_min)
+css_min = css_min.strip()
 
-# Remove blank lines and inter-tag whitespace
-new_html = re.sub(r'\n\s*\n', '\n', new_html)
-new_html = re.sub(r'>\s+<', '><', new_html)
+# Minify JS
+js_min = re.sub(r'//[^\n]*\n', '\n', js)
+js_min = re.sub(r'/\*.*?\*/', '', js_min, flags=re.DOTALL)
+js_min = re.sub(r'  +', ' ', js_min)
+js_min = re.sub(r'\n\s*\n', '\n', js_min)
+js_min = js_min.strip()
+
+# Build with inline CSS and JS
+parts = html[:css_match.start()] + '<style>' + css_min + '</style>' + html[css_match.end():js_match.start()] + '<script>' + js_min + '</script>' + html[js_match.end():]
+parts = re.sub(r'\n\s*\n', '\n', parts)
+parts = re.sub(r'>\s+<', '><', parts)
 
 with open('Index.html', 'w') as f:
-    f.write(new_html)
+    f.write(parts)
 
-print('Built: Styles.html (' + str(len(css_min)) + 'b), Index.html (' + str(len(new_html)) + 'b)')
+print(f'Built: {len(parts)} bytes')
 "
 
 clasp push

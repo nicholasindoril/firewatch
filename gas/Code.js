@@ -30,7 +30,7 @@ function doGet(e) {
   var p = e.parameter || {};
   if (p.v === 'data') return dataResponse(p);
   if (p.v === 'zip') return zipResponse(p);
-  return HtmlService.createTemplateFromFile('Index').evaluate()
+  return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('firewatch')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
