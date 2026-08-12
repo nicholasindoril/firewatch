@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html data-theme="dark">
+<html data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0d0d0f" id="themecolor">
+<meta name="theme-color" content="#f5f5f7" id="themecolor">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>firewatch</title>
@@ -131,7 +131,7 @@ body{color:var(--txt);font:14px/1.45 monospace;display:flex;flex-direction:colum
 <div id="foot">
   <span id="clock"></span>
   <span id="spark"></span>
-  <a href="#" id="themebtn" style="font-size:16px">☾</a>
+  <a href="#" id="themebtn" style="font-size:16px">☀</a>
   <a href="#" id="toggle">⚙</a>
 </div>
 <div id="settings"></div>
@@ -139,7 +139,7 @@ body{color:var(--txt);font:14px/1.45 monospace;display:flex;flex-direction:colum
 var API = 'https://script.google.com/macros/s/AKfycbwiA5CmmxSGT02wvNUjYQXeAeMhh70tUHv0EUV9eHiuJqnX0VuzaHiCjv8Y1nRXdbV7mw/exec';
 
 var S = document.getElementById('statustxt');
-var VER = 17;
+var VER = 18;
 document.getElementById('ver').textContent = 'v' + VER;
 var R = document.getElementById('risk');
 var P = document.getElementById('settings');
@@ -167,7 +167,7 @@ var lastData = null;
 var lastFires = [];
 var hist = JSON.parse(localStorage.getItem('fwHist') || '[]');
 var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-var theme = localStorage.getItem('fwTheme') || 'dark';
+var theme = localStorage.getItem('fwTheme') || 'light';
 var TILE_DARK = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
 var TILE_LIGHT = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 var TILE = theme === 'light' ? TILE_LIGHT : TILE_DARK;
