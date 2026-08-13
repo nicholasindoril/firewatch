@@ -34,7 +34,11 @@ function doGet(e) {
   if (p.v === 'zip') return zipResponse(p);
   // HtmlService template mode evaluates the <?!= ?> scriptlets in Index.html
   // (PRESETS + service URL injected into the page).
-  return HtmlService.createTemplateFromFile('Index').evaluate();
+  // addMetaTag viewport targets the GAS iframe chrome (the in-page meta alone is not enough on mobile).
+  const out = HtmlService.createTemplateFromFile('Index').evaluate();
+  out.setTitle('firewatch');
+  out.addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+  return out;
 }
 
 function json(obj) {
