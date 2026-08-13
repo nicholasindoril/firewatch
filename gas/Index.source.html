@@ -58,7 +58,7 @@ body{color:var(--txt);font:14px/1.45 system-ui,-apple-system,sans-serif;display:
 #lbtn button.busy,#rbtn button.busy,#rbtn button.on,#lbtn button.on{background:#2c3530;border-color:var(--green)}
 #radarc{display:flex;flex-direction:column;align-items:center}
 #radar{display:block;touch-action:manipulation;cursor:pointer}
-#radarlabel{color:var(--dim);font-size:11px;padding-top:2px;text-align:center;max-width:90vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#radarlabel{color:var(--dim);font-size:11px;padding-top:2px;text-align:center;max-width:100%;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #attrib{font-size:9px;color:#4a4a52;margin-top:2px}
 #attrib a{color:#4a4a52;text-decoration:none}
 @media (max-width:480px){
@@ -66,7 +66,9 @@ body{color:var(--txt);font:14px/1.45 system-ui,-apple-system,sans-serif;display:
   #lbtn button .g{font-size:14px}
   #rbtn button .g{font-size:17px}
   #lbtn button .lb,#rbtn button .lb{font-size:8px}
-  #radarwrap{gap:6px;padding:4px 2px}
+  #radarwrap{gap:6px;padding:4px 2px;width:100%;min-width:0}
+  #radarc{flex:1 1 0;min-width:0;max-width:100%;overflow:hidden}
+  #radarlabel{font-size:10px;max-width:100%;width:100%}
   #settings{flex-direction:column;align-items:stretch}
   #settings select,#settings input{width:100%!important}
   #settings input#lat,#settings input#lon{width:48%!important}
@@ -74,7 +76,6 @@ body{color:var(--txt);font:14px/1.45 system-ui,-apple-system,sans-serif;display:
   #list td.near{max-width:26vw}
   #foot{font-size:12px;gap:4px}
   #foot a{padding:6px 8px;min-width:40px;min-height:40px}
-  #radarlabel{font-size:10px}
 }
 #settings{flex-shrink:0;padding:8px 12px;border-bottom:1px solid var(--line);display:none;gap:8px;align-items:center;flex-wrap:wrap}
 #settings.show{display:flex}
@@ -511,10 +512,12 @@ function buildTiles(size, r, dpr) {
 
 function drawRadar(t) {
   var now = t || performance.now();
+  var box = document.getElementById('radarc');
   var side = document.getElementById('lbtn').offsetWidth || 52;
-  var availW = Math.min(window.innerWidth - side * 2 - 28, 520);
+  var availW = Math.min((box && box.clientWidth) || (window.innerWidth - side * 2 - 28), 520);
   var availH = Math.max(140, window.innerHeight * 0.38);
   var size = Math.round(Math.min(availW, availH));
+  if (size < 80) return;
   var dpr = window.devicePixelRatio || 1;
   radar.width = size * dpr;
   radar.height = size * dpr;
