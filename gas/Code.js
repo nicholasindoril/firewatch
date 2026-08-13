@@ -78,14 +78,17 @@ function dataResponse(p) {
         fires: fetchFires(src, lat, lon, radius, days),
         updated: new Date().toISOString()
       };
-      cache.put(cacheKey, JSON.stringify(obj), CACHE_TTL + Math.floor(Math.random() * 60));
     } catch (err) {
       return json({ area, lat, lon, radius, src: srcKey, fires: [],
                     error: String(err), updated: new Date().toISOString() });
     }
   }
-  // Place names for the nearest close fires (Maps service, cached 6h pos / 1h neg)
+  // Place names for the nearest close fires (Maps service, cached 6h pos / 1h neg).
+  // Write back AFTER attach so the next cache hit skips Maps on the critical path.
   if (p.geo !== '0') attachPlaceNames(obj);
+  try {
+    cache.put(cacheKey, JSON.stringify(obj), CACHE_TTL + Math.floor(Math.random() * 60));
+  } catch (_) {}
   return json(obj);
 }
 
