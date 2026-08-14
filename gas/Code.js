@@ -52,6 +52,7 @@ function dataResponse(p) {
   const srcKey = SOURCES[p.src] ? p.src : 'viirs';
   const src = SOURCES[srcKey];
   const days = Math.min(10, Math.max(1, parseInt(p.days, 10) || 1));
+  const minConf = Math.min(100, Math.max(1, parseInt(p.conf, 10) || 1));
   let lat, lon;
   if (p.lat && p.lon) {
     lat = parseFloat(p.lat); lon = parseFloat(p.lon);
@@ -64,7 +65,7 @@ function dataResponse(p) {
   radius = Math.max(radius, 5);
 
   const cache = CacheService.getScriptCache();
-  const cacheKey = firesKey(src, lat, lon, radius, days);
+  const cacheKey = firesKey(src, lat, lon, radius, days, minConf);
   let obj = null;
   const cached = cache.get(cacheKey);
   if (cached) {
@@ -72,18 +73,18 @@ function dataResponse(p) {
   }
   if (!obj) {
     if (!FIRMS_KEY) {
-      return json({ area, lat, lon, radius, src: srcKey, fires: [],
+      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, fires: [],
                     error: 'FIRMS_KEY not configured in script properties',
                     updated: new Date().toISOString() });
     }
     try {
       obj = {
-        area, lat, lon, radius, src: srcKey,
-        fires: fetchFires(src, lat, lon, radius, days),
+        area, lat, lon, radius, src: srcKey, conf: minConf,
+        fires: fetchFires(src, lat, lon, radius, days, minConf),
         updated: new Date().toISOString()
       };
     } catch (err) {
-      return json({ area, lat, lon, radius, src: srcKey, fires: [],
+      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, fires: [],
                     error: String(err), updated: new Date().toISOString() });
     }
   }
@@ -180,11 +181,22 @@ function placeName(lat, lon) {
   }
 }
 
-function firesKey(src, lat, lon, radius, days) {
-  return 'fires_' + src + '_' + lat.toFixed(3) + '_' + lon.toFixed(3) + '_' + radius + '_' + days;
+function firesKey(src, lat, lon, radius, days, minConf) {
+  return 'fires_' + src + '_' + lat.toFixed(3) + '_' + lon.toFixed(3) + '_' + radius + '_' + days + '_' + (minConf || 1);
 }
 
-function fetchFires(src, lat, lon, radius, days) {
+function confValue(c) {
+  if (c == null || c === '') return 100;
+  const s = String(c).trim().toLowerCase();
+  if (s === 'l' || s === 'low') return 30;
+  if (s === 'n' || s === 'nominal') return 50;
+  if (s === 'h' || s === 'high') return 80;
+  const n = parseFloat(s);
+  if (!isNaN(n)) return Math.max(0, Math.min(100, n));
+  return 100;
+}
+
+function fetchFires(src, lat, lon, radius, days, minConf) {
   const b = bbox(lat, lon, radius);
   if (src === 'ALL') {
     let responses;
@@ -196,7 +208,7 @@ function fetchFires(src, lat, lon, radius, days) {
     const all = [];
     responses.forEach((resp, i) => {
       if (resp && resp.getResponseCode() === 200) {
-        all.push(...parseRows(resp.getContentText(), lat, lon, radius));
+        all.push(...parseRows(resp.getContentText(), lat, lon, radius, minConf));
       }
     });
     return mergeFires(all);
@@ -206,7 +218,7 @@ function fetchFires(src, lat, lon, radius, days) {
     resp = UrlFetchApp.fetch(apiUrl(src, b, days), { muteHttpExceptions: true, timeout: 90000 });
   } catch (err) { return []; }
   if (resp.getResponseCode() !== 200) return [];
-  return parseRows(resp.getContentText(), lat, lon, radius);
+  return parseRows(resp.getContentText(), lat, lon, radius, minConf);
 }
 
 function apiUrl(src, b, days) {
@@ -221,7 +233,7 @@ function bbox(lat, lon, radius) {
   return { west: lon - dlon, south: lat - dlat, east: lon + dlon, north: lat + dlat };
 }
 
-function parseRows(csv, lat, lon, radius) {
+function parseRows(csv, lat, lon, radius, minConf) {
   const rows = Utilities.parseCsv(csv);
   if (rows.length < 2) return [];
   const header = rows[0];
@@ -233,6 +245,7 @@ function parseRows(csv, lat, lon, radius) {
     sat: header.indexOf('satellite'), dn: header.indexOf('daynight'),
     date: header.indexOf('acq_date'), time: header.indexOf('acq_time')
   };
+  const need = minConf == null ? 1 : minConf;
   const fires = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -240,11 +253,13 @@ function parseRows(csv, lat, lon, radius) {
     if (isNaN(flat) || isNaN(flon)) continue;
     const d = haversineKm(lat, lon, flat, flon);
     if (d > radius + 0.1) continue;
+    const rawConf = r[idx.conf] || '';
+    if (confValue(rawConf) < need) continue;
     fires.push({
       lat: flat, lon: flon, dist: d,
       frp: parseFloat(r[idx.frp]) || 0,
       bright: parseFloat(r[idx.bright]) || 0,
-      conf: r[idx.conf] || '', sat: r[idx.sat] || '',
+      conf: rawConf, sat: r[idx.sat] || '',
       dn: r[idx.dn] || '', acq_date: r[idx.date] || '', acq_time: r[idx.time] || '0000',
       bearing: bearingDeg(lat, lon, flat, flon)
     });
@@ -314,7 +329,7 @@ function warmCache() {
       for (const radius of [30, 60, 120, 250]) {
         try {
           const fires = fetchFires('VIIRS_SNPP_NRT', lat, lon, radius, 1);
-          cache.put(firesKey('VIIRS_SNPP_NRT', lat, lon, radius, 1), JSON.stringify({
+          cache.put(firesKey('VIIRS_SNPP_NRT', lat, lon, radius, 1, 1), JSON.stringify({
             area: name, lat, lon, radius, src: 'viirs', fires, updated: new Date().toISOString()
           }), CACHE_TTL + Math.floor(Math.random() * 60));
         } catch (err) {
