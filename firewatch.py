@@ -16,7 +16,7 @@ Usage:
   python firewatch.py --demo           # offline demo with sample data
 
 Keys: q quit · r refresh now · c cycle area preset · z postal code · g GPS
-      · h heading mode · [ / ] adjust offset · + / - radius
+      · h heading mode · [ / ] adjust offset · + / - radius · f confidence
 Env:  FIRMS_API_KEY (or pass --key)
 """
 
@@ -72,6 +72,8 @@ MAX_RADIUS = {"VIIRS_SNPP_NRT": 500, "VIIRS_NOAA20_NRT": 500, "VIIRS_NOAA21_NRT"
 MIN_RADIUS = 5
 ZOOM = 1.4  # zoom factor per + / - press
 WARN_KM = 10.0
+MATCH_KM = 1.5  # snapshot compare / merge radius
+FRP_EPS = 0.5  # MW threshold for up/down vs same
 SATS = {"N": "SN", "NPP": "SN", "N20": "N20", "NOAA-20": "N20",
         "N21": "N21", "NOAA-21": "N21", "T": "MOD", "Terra": "MOD",
         "A": "MOD", "Aqua": "MOD"}
@@ -110,22 +112,35 @@ def compass(deg):
     return dirs[int((deg + 22.5) // 45) % 8]
 
 
-def age_minutes(acq_date, acq_time):
+def parse_acq(acq_date, acq_time):
+    """Parse FIRMS acq_date + acq_time (HHMM, may lack leading zeros)."""
     try:
-        acq = dt.datetime.strptime(f"{acq_date} {acq_time}", "%Y-%m-%d %H%M")
-        acq = acq.replace(tzinfo=dt.timezone.utc)
-        return max(0, int((dt.datetime.now(dt.timezone.utc) - acq).total_seconds() / 60))
-    except ValueError:
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(acq_date or ""))
+        digits = re.sub(r"\D", "", str("" if acq_time is None else acq_time))
+        if not m or not digits:
+            return None
+        digits = digits.zfill(4)
+        hh, mm = int(digits[:2]), int(digits[2:4])
+        if hh > 23 or mm > 59:
+            return None
+        return dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                           hh, mm, tzinfo=dt.timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def age_minutes(acq_date, acq_time):
+    acq = parse_acq(acq_date, acq_time)
+    if acq is None:
         return -1
+    return max(0, int((dt.datetime.now(dt.timezone.utc) - acq).total_seconds() / 60))
 
 
 def local_str(acq_date, acq_time):
-    try:
-        acq = dt.datetime.strptime(f"{acq_date} {acq_time}", "%Y-%m-%d %H%M")
-        acq = acq.replace(tzinfo=dt.timezone.utc)
-        return acq.astimezone().strftime("%H:%M")
-    except ValueError:
+    acq = parse_acq(acq_date, acq_time)
+    if acq is None:
         return "--:--"
+    return acq.astimezone().strftime("%H:%M")
 
 
 def load_config():
@@ -151,7 +166,7 @@ def bbox(lat, lon, radius):
     return lon - dlon, lat - dlat, lon + dlon, lat + dlat
 
 
-def fetch_fires(key, src, lat, lon, radius, days):
+def fetch_fires(key, src, lat, lon, radius, days, min_conf=1):
     """Fetch FIRMS CSV for one source (or all, merged) and return parsed fires."""
     west, south, east, north = bbox(lat, lon, radius)
 
@@ -160,7 +175,7 @@ def fetch_fires(key, src, lat, lon, radius, days):
                          east=east, north=north, days=days)
         req = urllib.request.Request(url, headers={"User-Agent": "firewatch/1.0"})
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return parse_csv(resp.read().decode("utf-8"), lat, lon)
+            return parse_csv(resp.read().decode("utf-8"), lat, lon, min_conf)
 
     if src == "ALL":
         with ThreadPoolExecutor(max_workers=len(MULTI_SRCS)) as ex:
@@ -182,6 +197,64 @@ def merge_fires(fires, km=1.5):
             f["sats"] = {f["sat"]}
             merged.append(f)
     return merged
+
+
+def same_scene(a, b):
+    """True when two snapshots share area/source/conf so FRP compare is valid."""
+    if not a or not b:
+        return False
+    return (a.get("radius") == b.get("radius")
+            and a.get("src") == b.get("src")
+            and (a.get("conf") if a.get("conf") is not None else 1)
+            == (b.get("conf") if b.get("conf") is not None else 1)
+            and abs((a.get("lat") or 0) - (b.get("lat") or 0)) < 0.02
+            and abs((a.get("lon") or 0) - (b.get("lon") or 0)) < 0.02)
+
+
+def diff_fires(prev, curr):
+    """Match fires within MATCH_KM; attach trend/d_frp/pct like the web app."""
+    used = set()
+    out = []
+    for e in curr:
+        best_i, best_d = -1, MATCH_KM
+        for i, p in enumerate(prev):
+            if i in used:
+                continue
+            d = haversine_km(e["lat"], e["lon"], p["lat"], p["lon"])
+            if d <= best_d:
+                best_d, best_i = d, i
+        nf = dict(e)
+        if best_i < 0:
+            nf.update(trend="new", d_frp=0.0, d_bright=0.0, pct=None)
+            out.append(nf)
+            continue
+        used.add(best_i)
+        p = prev[best_i]
+        d_frp = e["frp"] - p["frp"]
+        d_bright = e["bright"] - p["bright"]
+        pct = (d_frp / p["frp"] * 100.0) if p["frp"] >= 0.05 else None
+        if d_frp > FRP_EPS:
+            trend = "up"
+        elif d_frp < -FRP_EPS:
+            trend = "down"
+        else:
+            trend = "same"
+        nf.update(trend=trend, d_frp=d_frp, d_bright=d_bright, pct=pct)
+        out.append(nf)
+    return out
+
+
+def trend_mark(f):
+    t = f.get("trend")
+    if t == "new":
+        return " +"
+    if t not in ("up", "down"):
+        return ""
+    arrow = "↑" if t == "up" else "↓"
+    pct = f.get("pct")
+    if pct is None or not math.isfinite(pct):
+        return f" {arrow}"
+    return f" {arrow}{min(999, abs(round(pct)))}%"
 
 
 def sats_str(f):
@@ -422,13 +495,17 @@ def compass_bar(heading, offset=0):
     return "".join(parts)
 
 
-def parse_csv(text, center_lat, center_lon):
+def parse_csv(text, center_lat, center_lon, min_conf=1):
     rows = list(csv.DictReader(text.splitlines()))
     fires = []
+    need = 1 if min_conf is None else min_conf
     for r in rows:
         try:
             lat, lon = float(r["latitude"]), float(r["longitude"])
         except (KeyError, ValueError):
+            continue
+        raw_conf = r.get("confidence", "")
+        if conf_value(raw_conf) < need:
             continue
         brightness = r.get("bright_ti4") or r.get("brightness") or "0"
         fires.append({
@@ -436,7 +513,7 @@ def parse_csv(text, center_lat, center_lon):
             "lon": lon,
             "bright": float(brightness),
             "frp": float(r.get("frp", 0) or 0),
-            "conf": r.get("confidence", ""),
+            "conf": raw_conf,
             "sat": r.get("satellite", ""),
             "instrument": r.get("instrument", ""),
             "daynight": r.get("daynight", ""),
@@ -448,14 +525,20 @@ def parse_csv(text, center_lat, center_lon):
     return fires
 
 
-def demo_fires(center_lat, center_lon):
-    return [{
-        "lat": lat, "lon": lon, "bright": bright, "frp": frp, "conf": conf,
-        "sat": sat, "instrument": inst, "daynight": dn,
-        "acq_date": d, "acq_time": t,
-        "dist": haversine_km(center_lat, center_lon, lat, lon),
-        "bearing": bearing_deg(center_lat, center_lon, lat, lon),
-    } for lat, lon, bright, d, t, sat, inst, conf, frp, dn in DEMO_FIRES]
+def demo_fires(center_lat, center_lon, min_conf=1):
+    need = 1 if min_conf is None else min_conf
+    out = []
+    for lat, lon, bright, d, t, sat, inst, conf, frp, dn in DEMO_FIRES:
+        if conf_value(conf) < need:
+            continue
+        out.append({
+            "lat": lat, "lon": lon, "bright": bright, "frp": frp, "conf": conf,
+            "sat": sat, "instrument": inst, "daynight": dn,
+            "acq_date": d, "acq_time": t,
+            "dist": haversine_km(center_lat, center_lon, lat, lon),
+            "bearing": bearing_deg(center_lat, center_lon, lat, lon),
+        })
+    return out
 
 
 def friendly_age(age_min):
@@ -472,6 +555,24 @@ def friendly_age(age_min):
 def friendly_dir(deg):
     return ["north", "northeast", "east", "southeast", "south",
             "southwest", "west", "northwest"][int((deg + 22.5) // 45) % 8]
+
+
+def conf_value(c):
+    """Map FIRMS confidence (numeric or l/n/h) to 0-100 for filtering."""
+    if c is None or c == "":
+        return 100
+    s = str(c).strip().lower()
+    if s in ("l", "low"):
+        return 30
+    if s in ("n", "nominal"):
+        return 50
+    if s in ("h", "high"):
+        return 80
+    try:
+        n = float(s)
+        return max(0, min(100, n))
+    except ValueError:
+        return 100
 
 
 def conf_word(conf):
@@ -550,9 +651,14 @@ def fire_lines(fires, ctx, expert=False, max_fires=25, heading=None, offset=0):
             dir_str = compass(f["bearing"])
             dir_style = main
 
+        mark = trend_mark(f)
         if expert:
-            frp_cell = Text(f"{f['frp']:.1f}", style=main)
+            frp_cell = Text(f"{f['frp']:.1f}{mark}", style=main)
             bright_cell = Text(f"{f['bright']:.0f} K", style=main)
+            if f.get("trend") not in (None, "new", "same") and f.get("d_bright"):
+                db = round(f["d_bright"])
+                if db:
+                    bright_cell.append(f" {db:+d}", style="dim")
             dir_cell = Text(dir_str, style=dir_style)
             conf_cell = Text(f"{cw} {f['conf']}", style=conf_style)
             sat_cell = Text(sats_str(f),
@@ -566,7 +672,7 @@ def fire_lines(fires, ctx, expert=False, max_fires=25, heading=None, offset=0):
         else:
             intensity = Text()
             intensity.append(size, style=size_style)
-            intensity.append(f" {f['frp']:.1f}MW", style=main)
+            intensity.append(f" {f['frp']:.1f}MW{mark}", style=main)
             dir_cell = Text(dir_str, style=dir_style)
             detail = Text()
             detail.append(cw, style=conf_style)
@@ -855,21 +961,26 @@ def run_once(args, cfg):
             console.print(f"[red]error: {e}[/red]")
             return 1
         area = gps_name(gacc, glat, glon); lat, lon = glat, glon
-    src_key = args.source
+    src_key = args.source or cfg.get("source") or "all"
+    if src_key not in SOURCES:
+        src_key = "all"
     src = SOURCES[src_key]
     radius = args.radius or cfg.get("radius") or 60
     radius = min(radius, MAX_RADIUS[src])
+    min_conf = args.conf if args.conf is not None else cfg.get("conf", 1)
+    min_conf = min(100, max(1, int(min_conf) or 1))
     now = dt.datetime.now()
-    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src, updated=now, clock=now)
+    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src, conf=min_conf,
+               updated=now, clock=now)
     error = None
     if args.demo:
-        fires = demo_fires(lat, lon)
+        fires = demo_fires(lat, lon, min_conf)
     elif not key:
         fires = []
         error = "No API key. Set FIRMS_API_KEY or pass --key. Get one free at https://earthdata.nasa.gov"
     else:
         try:
-            fires = fetch_fires(key, src, lat, lon, radius, args.days)
+            fires = fetch_fires(key, src, lat, lon, radius, args.days, min_conf)
         except Exception as e:
             fires = []
             error = f"{type(e).__name__}: {e}"
@@ -893,17 +1004,23 @@ def run_tui(args, cfg):
     zlat, zlon, zname, zerr = apply_zip(args, cfg)
     if zlat is not None:
         area, lat, lon = zname, zlat, zlon
-    src_key = args.source
+    src_key = args.source or cfg.get("source") or "all"
+    if src_key not in SOURCES:
+        src_key = "all"
     src = SOURCES[src_key]
     radius = min(args.radius or cfg.get("radius") or 60, MAX_RADIUS[src])
-    interval = args.interval
+    interval = args.interval if args.interval is not None else cfg.get("interval") or 300
+    interval = max(60, int(interval) or 300)
+    min_conf = args.conf if args.conf is not None else cfg.get("conf", 1)
+    min_conf = min(100, max(1, int(min_conf) or 1))
 
-    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src,
+    ctx = dict(area=area, lat=lat, lon=lon, radius=radius, src=src, conf=min_conf,
                updated=dt.datetime.now())
     fires, error = [], None
     countdown = 0
     detail = False
     fire_history = []  # fire counts for sparkline
+    prev_snap = None  # last raw snapshot for FRP compare
 
     # heading / compass state
     heading_active = args.heading or cfg.get("heading", False)
@@ -949,10 +1066,10 @@ def run_tui(args, cfg):
         """Return (fires, error) for the current area/radius/source."""
         try:
             if args.demo:
-                return demo_fires(lat, lon), None
+                return demo_fires(lat, lon, min_conf), None
             if not key:
                 return [], "No API key. Set FIRMS_API_KEY or pass --key. Get one free at https://earthdata.nasa.gov"
-            return fetch_fires(key, src, lat, lon, radius, args.days), None
+            return fetch_fires(key, src, lat, lon, radius, args.days, min_conf), None
         except Exception as e:
             return [], f"{type(e).__name__}: {e}"
 
@@ -966,20 +1083,33 @@ def run_tui(args, cfg):
         seq = fetch_seq
 
         def work():
-            nonlocal fires, error
+            nonlocal fires, error, prev_snap
             new_fires, new_err = fetch_once()
             if seq == fetch_seq:
                 ctx["updated"] = dt.datetime.now()
-                fires, error = new_fires, new_err
-                fire_history.append(len(new_fires))
+                ctx["conf"] = min_conf
+                scene = dict(area=area, lat=lat, lon=lon, radius=radius,
+                             src=src, conf=min_conf)
+                raw = new_fires
+                if (not new_err and prev_snap and prev_snap.get("fires")
+                        and same_scene(prev_snap, scene)):
+                    fires = diff_fires(prev_snap["fires"], raw)
+                else:
+                    fires = raw
+                error = new_err
+                if not new_err:
+                    prev_snap = dict(scene, fires=raw)
+                fire_history.append(len(raw))
                 if len(fire_history) > 60:
                     fire_history[:] = fire_history[-60:]
-                queue_fire_places(new_fires)
+                queue_fire_places(raw)
 
         threading.Thread(target=work, daemon=True).start()
 
     threading.Thread(target=geo_worker, daemon=True).start()
     fires, error = fetch_once()
+    prev_snap = dict(area=area, lat=lat, lon=lon, radius=radius, src=src,
+                    conf=min_conf, fires=list(fires))
     fire_history.append(len(fires))
     queue_fire_places(fires)
 
@@ -1005,6 +1135,7 @@ def run_tui(args, cfg):
                 offset_hint = " \\[ \\] adj" if heading_active else ""
                 footer = (f"[cyan]q[/] quit · [cyan]r[/] refresh · [cyan]c[/] area · "
                           f"[cyan]z[/] zip · [cyan]g[/] gps · [cyan]s[/] src · "
+                          f"[cyan]f[/] conf {min_conf} · "
                           f"[cyan]d[/] {'expert' if detail else 'simple'} · "
                           f"{h_tag}{offset_hint} · "
                           f"[cyan]+[/]/[cyan]-[/] zoom"
@@ -1019,7 +1150,8 @@ def run_tui(args, cfg):
 
             def refetch():
                 nonlocal countdown
-                ctx.update(area=area, lat=lat, lon=lon, radius=radius, src=src)
+                ctx.update(area=area, lat=lat, lon=lon, radius=radius, src=src,
+                           conf=min_conf)
                 start_fetch()
                 countdown = interval
                 show()
@@ -1041,6 +1173,8 @@ def run_tui(args, cfg):
                     heading_stop.set()
                     save_config({"area": area, "lat": lat, "lon": lon,
                                  "radius": radius, "source": src_key,
+                                 "conf": min_conf, "interval": interval,
+                                 "country": country,
                                  "heading": heading_active,
                                  "heading_offset": heading_offset})
                     break
@@ -1069,6 +1203,30 @@ def run_tui(args, cfg):
                 if ch == "d":
                     detail = not detail
                     show()
+                if ch == "f":
+                    live.stop()
+                    if saved_tty is not None:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, saved_tty)
+                    try:
+                        raw = input(f"confidence 1-100 (now {min_conf}): ").strip()
+                    except EOFError:
+                        raw = ""
+                    if saved_tty is not None:
+                        tty.setcbreak(fd)
+                    live.start()
+                    if raw:
+                        try:
+                            min_conf = min(100, max(1, int(raw)))
+                        except ValueError:
+                            error = "invalid confidence (use 1-100)"
+                            continue
+                        ctx["conf"] = min_conf
+                        prev_snap = None
+                        save_config({"area": area, "lat": lat, "lon": lon,
+                                     "radius": radius, "source": src_key,
+                                     "conf": min_conf, "interval": interval,
+                                     "country": country})
+                        refetch()
                 if ch == "h":
                     if heading_active:
                         heading_stop.set()
@@ -1166,10 +1324,13 @@ def main():
                     help="use device GPS (needs termux-api: pkg install termux-api)")
     ap.add_argument("--country", help="country for postal codes (default Greece)")
     ap.add_argument("--radius", type=float, help="radius in km (default 60)")
-    ap.add_argument("--source", choices=SOURCES, default="viirs",
-                    help="satellite: viirs, noaa20, noaa21, modis, or all (merge + cross-check)")
+    ap.add_argument("--source", choices=SOURCES, default=None,
+                    help="satellite: viirs, noaa20, noaa21, modis, or all (default: all / config)")
     ap.add_argument("--days", type=int, default=1, help="days of data (1-10)")
-    ap.add_argument("--interval", type=int, default=300, help="refresh seconds (default 300)")
+    ap.add_argument("--conf", type=int, default=None,
+                    help="min confidence 1-100 (default 1 / config); VIIRS l/n/h mapped")
+    ap.add_argument("--interval", type=int, default=None,
+                    help="refresh seconds (default 300 / config)")
     ap.add_argument("--key", help="FIRMS API key (or env FIRMS_API_KEY)")
     ap.add_argument("--heading", action="store_true",
                     help="use phone compass to orient radar (needs termux-api)")
