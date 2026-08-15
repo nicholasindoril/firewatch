@@ -73,21 +73,22 @@ function dataResponse(p) {
   }
   if (!obj) {
     if (!FIRMS_KEY) {
-      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, fires: [],
+      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, days, fires: [],
                     error: 'FIRMS_KEY not configured in script properties',
                     updated: new Date().toISOString() });
     }
     try {
       obj = {
-        area, lat, lon, radius, src: srcKey, conf: minConf,
+        area, lat, lon, radius, src: srcKey, conf: minConf, days,
         fires: fetchFires(src, lat, lon, radius, days, minConf),
         updated: new Date().toISOString()
       };
     } catch (err) {
-      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, fires: [],
+      return json({ area, lat, lon, radius, src: srcKey, conf: minConf, days, fires: [],
                     error: String(err), updated: new Date().toISOString() });
     }
   }
+  obj.days = days;
   // Place names for the nearest close fires (Maps service, cached 6h pos / 1h neg).
   // Write back AFTER attach so the next cache hit skips Maps on the critical path.
   if (p.geo !== '0') attachPlaceNames(obj);
