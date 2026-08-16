@@ -107,8 +107,9 @@ function zipResponse(p) {
     try { return json(JSON.parse(cached)); } catch (_) {} // corrupt entry = miss
   }
   try {
-    const g = Maps.newGeocoder();
+    const g = Maps.newGeocoder().setLanguage('el');
     if (/^[A-Za-z]{2}$/.test(country)) g.setRegion(country.toUpperCase());
+    else if (/greece|ελλάδ/i.test(country)) g.setRegion('GR');
     const res = g.geocode(p.zip + ', ' + country);
     let out;
     if (!res.results || !res.results.length) {
@@ -146,7 +147,7 @@ function attachPlaceNames(obj) {
   for (let i = 0; i < fires.length; i++) {
     const f = fires[i];
     if (f.near) continue;
-    const ck = 'place_' + f.lat.toFixed(3) + '_' + f.lon.toFixed(3);
+    const ck = 'place_el_' + f.lat.toFixed(3) + '_' + f.lon.toFixed(3);
     const hit = cache.get(ck);
     if (hit !== null) {
       if (hit) f.near = hit;
@@ -161,11 +162,11 @@ function attachPlaceNames(obj) {
 
 // Cached reverse geocode. Cached '' (negative) is valid — use !== null, not truthiness.
 function placeName(lat, lon) {
-  const ck = 'place_' + lat.toFixed(3) + '_' + lon.toFixed(3);
+  const ck = 'place_el_' + lat.toFixed(3) + '_' + lon.toFixed(3);
   const hit = CacheService.getScriptCache().get(ck);
   if (hit !== null) return hit;
   try {
-    const res = Maps.newGeocoder().reverseGeocode(lat, lon);
+    const res = Maps.newGeocoder().setLanguage('el').setRegion('GR').reverseGeocode(lat, lon);
     if (!res.results || !res.results.length) {
       CacheService.getScriptCache().put(ck, '', PLACE_NEG_TTL);
       return '';

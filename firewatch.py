@@ -294,7 +294,8 @@ def geocode_zip(code, country):
     })
     req = urllib.request.Request(
         f"https://nominatim.openstreetmap.org/search?{qs}",
-        headers={"User-Agent": "firewatch/1.0 (Termux)"})
+        headers={"User-Agent": "firewatch/1.0 (Termux)",
+                 "Accept-Language": "el"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not data:
@@ -330,10 +331,12 @@ def save_geo_cache():
 def geocode_reverse(lat, lon):
     """Nearest place name for fire coordinates, e.g. 'Αμφίπολη ·62052'."""
     qs = urllib.parse.urlencode({"lat": f"{lat:.5f}", "lon": f"{lon:.5f}",
-                                 "format": "jsonv2", "addressdetails": "1", "zoom": 14})
+                                 "format": "jsonv2", "addressdetails": "1", "zoom": 14,
+                                 "accept-language": "el"})
     req = urllib.request.Request(
         f"https://nominatim.openstreetmap.org/reverse?{qs}",
-        headers={"User-Agent": "firewatch/1.0 (Termux)"})
+        headers={"User-Agent": "firewatch/1.0 (Termux)",
+                 "Accept-Language": "el"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         place = json.loads(resp.read().decode("utf-8"))
     name = place_name(place) or f"{lat:.2f}, {lon:.2f}"
