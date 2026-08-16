@@ -350,7 +350,8 @@ def near_str(f):
 
 
 def queue_fire_places(fires):
-    for f in fires:
+    """Queue reverse-geocode for every fire; nearer first so Place fills sooner."""
+    for f in sorted(fires, key=lambda x: x.get("dist", 0)):
         key = fire_place_key(f)
         if key not in geo_places and key not in geo_seen:
             geo_seen.add(key)

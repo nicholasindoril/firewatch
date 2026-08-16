@@ -23,8 +23,8 @@ const CACHE_TTL = 600;        // data cache, seconds (jittered +0..60 on write)
 const PLACE_TTL = 21600;      // place-name positive cache, 6h
 const PLACE_NEG_TTL = 3600;   // place-name negative cache, 1h (quota burn fix)
 const ZIP_TTL = 604800;       // zip geocode positive cache, 7d
-const GEO_MAX_FIRES = 2;      // max reverse-geocodes per request
-const GEO_MAX_DIST = 50;      // only geocode fires this close (km)
+const GEO_MAX_FIRES = 10;     // max live reverse-geocodes per request (cache fills the rest)
+const GEO_MAX_DIST = 150;     // only live-geocode fires this close (km)
 
 const API = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv/{key}/{src}/{west},{south},{east},{north}/{days}';
 
@@ -137,18 +137,25 @@ function shortName(comps) {
   return '';
 }
 
-// Attach human-readable names to the nearest close fires (<=2, <=50 km).
+// Attach place names: cache for every fire; live Maps reverse-geocode for the
+// nearest uncached ones (cap GEO_MAX_FIRES, only within GEO_MAX_DIST km).
 function attachPlaceNames(obj) {
   const cache = CacheService.getScriptCache();
   const fires = obj.fires || [];
-  for (let i = 0; i < fires.length && i < GEO_MAX_FIRES; i++) {
+  let live = 0;
+  for (let i = 0; i < fires.length; i++) {
     const f = fires[i];
-    if (f.dist > GEO_MAX_DIST) break; // fires sorted by dist: nothing closer after this
     if (f.near) continue;
     const ck = 'place_' + f.lat.toFixed(3) + '_' + f.lon.toFixed(3);
     const hit = cache.get(ck);
-    if (hit !== null) { f.near = hit; continue; }
-    f.near = placeName(f.lat, f.lon);
+    if (hit !== null) {
+      if (hit) f.near = hit;
+      continue;
+    }
+    if (f.dist > GEO_MAX_DIST || live >= GEO_MAX_FIRES) continue;
+    const name = placeName(f.lat, f.lon);
+    live++;
+    if (name) f.near = name;
   }
 }
 
