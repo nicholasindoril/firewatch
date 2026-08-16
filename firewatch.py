@@ -505,7 +505,8 @@ def parse_csv(text, center_lat, center_lon, min_conf=1):
         except (KeyError, ValueError):
             continue
         raw_conf = r.get("confidence", "")
-        if conf_value(raw_conf) < need:
+        conf_num = int(round(conf_value(raw_conf)))
+        if conf_num < need:
             continue
         brightness = r.get("bright_ti4") or r.get("brightness") or "0"
         fires.append({
@@ -513,7 +514,7 @@ def parse_csv(text, center_lat, center_lon, min_conf=1):
             "lon": lon,
             "bright": float(brightness),
             "frp": float(r.get("frp", 0) or 0),
-            "conf": raw_conf,
+            "conf": conf_num,
             "sat": r.get("satellite", ""),
             "instrument": r.get("instrument", ""),
             "daynight": r.get("daynight", ""),
@@ -529,10 +530,11 @@ def demo_fires(center_lat, center_lon, min_conf=1):
     need = 1 if min_conf is None else min_conf
     out = []
     for lat, lon, bright, d, t, sat, inst, conf, frp, dn in DEMO_FIRES:
-        if conf_value(conf) < need:
+        conf_num = int(round(conf_value(conf)))
+        if conf_num < need:
             continue
         out.append({
-            "lat": lat, "lon": lon, "bright": bright, "frp": frp, "conf": conf,
+            "lat": lat, "lon": lon, "bright": bright, "frp": frp, "conf": conf_num,
             "sat": sat, "instrument": inst, "daynight": dn,
             "acq_date": d, "acq_time": t,
             "dist": haversine_km(center_lat, center_lon, lat, lon),
@@ -558,7 +560,7 @@ def friendly_dir(deg):
 
 
 def conf_value(c):
-    """Map FIRMS confidence (numeric or l/n/h) to 0-100 for filtering."""
+    """Map FIRMS confidence (numeric or l/n/h) to 0-100 for filter and display."""
     if c is None or c == "":
         return 100
     s = str(c).strip().lower()
@@ -660,7 +662,7 @@ def fire_lines(fires, ctx, expert=False, max_fires=25, heading=None, offset=0):
                 if db:
                     bright_cell.append(f" {db:+d}", style="dim")
             dir_cell = Text(dir_str, style=dir_style)
-            conf_cell = Text(f"{cw} {f['conf']}", style=conf_style)
+            conf_cell = Text(str(int(round(conf_value(f["conf"])))), style=conf_style)
             sat_cell = Text(sats_str(f),
                             style="cyan" if len(sats) > 1 else main)
             dn_cell = Text(f["daynight"] or "--", style=main)
@@ -675,7 +677,7 @@ def fire_lines(fires, ctx, expert=False, max_fires=25, heading=None, offset=0):
             intensity.append(f" {f['frp']:.1f}MW{mark}", style=main)
             dir_cell = Text(dir_str, style=dir_style)
             detail = Text()
-            detail.append(cw, style=conf_style)
+            detail.append(str(int(round(conf_value(f["conf"])))), style=conf_style)
             detail.append(" ")
             detail.append(sats_str(f),
                           style="cyan" if len(sats) > 1 else None)

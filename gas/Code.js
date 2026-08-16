@@ -255,12 +255,13 @@ function parseRows(csv, lat, lon, radius, minConf) {
     const d = haversineKm(lat, lon, flat, flon);
     if (d > radius + 0.1) continue;
     const rawConf = r[idx.conf] || '';
-    if (confValue(rawConf) < need) continue;
+    const confNum = Math.round(confValue(rawConf));
+    if (confNum < need) continue;
     fires.push({
       lat: flat, lon: flon, dist: d,
       frp: parseFloat(r[idx.frp]) || 0,
       bright: parseFloat(r[idx.bright]) || 0,
-      conf: rawConf, sat: r[idx.sat] || '',
+      conf: confNum, sat: r[idx.sat] || '',
       dn: r[idx.dn] || '', acq_date: r[idx.date] || '', acq_time: r[idx.time] || '0000',
       bearing: bearingDeg(lat, lon, flat, flon)
     });
