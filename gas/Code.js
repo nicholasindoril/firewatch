@@ -92,16 +92,21 @@ function getPerfSpreadsheet_(dateStr) {
   return ss;
 }
 
-function perfResponse(body) {
+/**
+ * Core ingest — returns a plain object (for google.script.run AND HTTP wrappers).
+ * Browser fetch POST to /exec is unreliable (302 strips body); prefer ingestPerf().
+ */
+function perfIngest(body) {
+  body = body || {};
   const marks = Array.isArray(body.marks) ? body.marks.slice(0, 80) : [];
-  if (!marks.length) return json({ ok: true, n: 0 });
+  if (!marks.length) return { ok: true, n: 0 };
   const clientId = String(body.clientId || '').slice(0, 80);
   const sessionId = String(body.sessionId || '').slice(0, 80);
   const ver = String(body.ver || '').slice(0, 16);
   const mapDefault = String(body.map || '').slice(0, 24);
   const ua = String(body.ua || '').slice(0, 160);
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) return json({ ok: false, error: 'busy' });
+  if (!lock.tryLock(15000)) return { ok: false, error: 'busy' };
   try {
     const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Europe/Athens', 'yyyy-MM-dd');
     const ss = getPerfSpreadsheet_(dateStr);
@@ -131,9 +136,33 @@ function perfResponse(body) {
       ];
     });
     sh.getRange(sh.getLastRow() + 1, 1, rows.length, PERF_HEADERS.length).setValues(rows);
-    return json({ ok: true, n: rows.length, file: ss.getName(), id: ss.getId() });
+    return { ok: true, n: rows.length, file: ss.getName(), id: ss.getId() };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/** HtmlService bridge — called from the page via google.script.run.ingestPerf(...) */
+function ingestPerf(body) {
+  try {
+    return perfIngest(body);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+/** One-shot auth + folder check — run from Apps Script editor once to grant Drive/Sheets. */
+function authorizePerfDrive() {
+  const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Europe/Athens', 'yyyy-MM-dd');
+  const ss = getPerfSpreadsheet_(dateStr);
+  return { ok: true, file: ss.getName(), id: ss.getId(), url: ss.getUrl() };
+}
+
+function perfResponse(body) {
+  try {
+    return json(perfIngest(body));
+  } catch (err) {
+    return json({ ok: false, error: String(err && err.message || err) });
   }
 }
 
