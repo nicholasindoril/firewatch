@@ -1,4 +1,5 @@
-// Set FIRMS_KEY in script properties (Script Properties) — no hardcoded fallback.
+// Set FIRMS_KEY and CARTO_KEY in Script Properties — no hardcoded secrets.
+// CARTO_KEY (optional): free key from https://carto.com/basemaps/apikey — injected into Index as FW_CARTO for tile ?key=.
 const FIRMS_KEY = PropertiesService.getScriptProperties().getProperty('FIRMS_KEY');
 
 const PRESETS = {
