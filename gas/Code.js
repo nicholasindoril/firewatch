@@ -1,6 +1,9 @@
 // Set FIRMS_KEY and CARTO_KEY in Script Properties — no hardcoded secrets.
 // CARTO_KEY (optional): free key from https://carto.com/basemaps/apikey — injected into Index as FW_CARTO for tile ?key=.
+// PerfMarks: daily Sheets land in PERF_FOLDER_ID (Drive).
 const FIRMS_KEY = PropertiesService.getScriptProperties().getProperty('FIRMS_KEY');
+const PERF_FOLDER_ID = '1_9FDyi1CppnvhSg6G-fK2cdRu1dNfwTC';
+const PERF_HEADERS = ['ts', 'clientId', 'sessionId', 'ver', 'mark', 'ms', 'map', 'meta', 'ua'];
 
 const PRESETS = {
   athens: [37.9838, 23.7275],
@@ -42,9 +45,96 @@ function doGet(e) {
   return out;
 }
 
+function doPost(e) {
+  try {
+    const p = (e && e.parameter) || {};
+    const raw = (e && e.postData && e.postData.contents) || '{}';
+    const body = JSON.parse(raw);
+    if (p.v === 'perf' || body.v === 'perf') return perfResponse(body);
+    return json({ ok: false, error: 'unknown' });
+  } catch (err) {
+    return json({ ok: false, error: String(err && err.message || err) });
+  }
+}
+
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Daily spreadsheet firewatch-perf-YYYY-MM-DD inside PERF_FOLDER_ID. */
+function getPerfSpreadsheet_(dateStr) {
+  const cache = CacheService.getScriptCache();
+  const ck = 'fwPerfSs:' + dateStr;
+  const cached = cache.get(ck);
+  if (cached) {
+    try {
+      return SpreadsheetApp.openById(cached);
+    } catch (err) {
+      // stale cache — recreate below
+    }
+  }
+  const folder = DriveApp.getFolderById(PERF_FOLDER_ID);
+  const name = 'firewatch-perf-' + dateStr;
+  const it = folder.getFilesByName(name);
+  let ss;
+  if (it.hasNext()) {
+    ss = SpreadsheetApp.open(it.next());
+  } else {
+    ss = SpreadsheetApp.create(name);
+    const file = DriveApp.getFileById(ss.getId());
+    file.moveTo(folder);
+    const sh = ss.getSheets()[0];
+    sh.setName('marks');
+    sh.getRange(1, 1, 1, PERF_HEADERS.length).setValues([PERF_HEADERS]);
+  }
+  cache.put(ck, ss.getId(), 21600);
+  return ss;
+}
+
+function perfResponse(body) {
+  const marks = Array.isArray(body.marks) ? body.marks.slice(0, 80) : [];
+  if (!marks.length) return json({ ok: true, n: 0 });
+  const clientId = String(body.clientId || '').slice(0, 80);
+  const sessionId = String(body.sessionId || '').slice(0, 80);
+  const ver = String(body.ver || '').slice(0, 16);
+  const mapDefault = String(body.map || '').slice(0, 24);
+  const ua = String(body.ua || '').slice(0, 160);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return json({ ok: false, error: 'busy' });
+  try {
+    const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Europe/Athens', 'yyyy-MM-dd');
+    const ss = getPerfSpreadsheet_(dateStr);
+    const sh = ss.getSheets()[0];
+    if (sh.getLastRow() === 0) {
+      sh.getRange(1, 1, 1, PERF_HEADERS.length).setValues([PERF_HEADERS]);
+    }
+    const rows = marks.map(function (m) {
+      var meta = m && m.m != null ? m.m : null;
+      var metaStr = '';
+      try {
+        metaStr = meta != null ? JSON.stringify(meta).slice(0, 240) : '';
+      } catch (err) {
+        metaStr = '';
+      }
+      var mapVal = (meta && meta.map) || mapDefault;
+      return [
+        m && m.t || Date.now(),
+        clientId,
+        sessionId,
+        ver,
+        String((m && m.n) || '').slice(0, 64),
+        Number(m && m.ms) || 0,
+        String(mapVal || '').slice(0, 24),
+        metaStr,
+        ua
+      ];
+    });
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, PERF_HEADERS.length).setValues(rows);
+    return json({ ok: true, n: rows.length, file: ss.getName(), id: ss.getId() });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function dataResponse(p) {
